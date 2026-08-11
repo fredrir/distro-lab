@@ -1,0 +1,5 @@
+# Host Computer
+ssh-ed25519 XXX
+
+# External Computer (On the tailnet)
+ssh-ed25199 XXX

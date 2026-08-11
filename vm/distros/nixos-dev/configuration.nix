@@ -30,8 +30,8 @@ extraGroups = [
 ];
 
 openssh.authorizedKeys.keys = [
-"ssh-ed25519 AAAA...ARCH_KEY..."
-"ssh-ed25519 AAAA...MACBOOK_KEY..."
+"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIP7e69HsqnaggjeyngV0qUOurh5F9VMs7cudV0mu0QzD archie"
+"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIH0jzc3S05J0DFj3W+Gv6J4Hc9fxvUjIOEuTWKfVnVY9 macie"
 ];
 };
 

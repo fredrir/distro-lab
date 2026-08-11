@@ -1,0 +1,29 @@
+# OpenTofu runtime
+**/.terraform/
+**/*.tfstate
+**/*.tfstate.*
+**/crash.log
+
+# Keep provider locks!
+# .terraform.lock.hcl SHOULD be committed
+
+# VM artifacts
+/images/
+*.qcow2
+*.qcow
+*.raw
+*.img
+
+# Install media
+/ISOs/
+*.iso
+
+# Runtime mounts / state
+/mounts/
+/roots/
+/storage/
+/EFI/
+
+
+# ssh
+authorized_keys

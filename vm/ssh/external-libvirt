@@ -1,0 +1,4 @@
+Host *-dev
+    User fredrir
+    ProxyCommand ssh -T -q arch-home \
+        ~/.local/bin/libvirt-ssh-proxy %h %p
