@@ -35,6 +35,10 @@ resource "libvirt_domain" "vm" {
     apic = {}
   }
 
+  cpu = {
+    mode = "host-passthrough"
+  }
+
   os = {
     type         = "hvm"
     type_arch    = "x86_64"

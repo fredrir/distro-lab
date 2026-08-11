@@ -101,3 +101,14 @@ make nixos-dev/apply TOFU_ARGS=-auto-approve
 
 `make env` prints the variables that would be handed to OpenTofu, and `make fmt`
 formats everything under `src/`.
+
+`FAST=1` adds `-refresh=false -lock=false` to `plan`, `apply` and `destroy`,
+skipping the reconciliation pass against libvirt. Use it when nothing has
+changed the VMs behind OpenTofu's back:
+
+```bash
+make nixos-dev/plan FAST=1
+```
+
+`TF_PLUGIN_CACHE_DIR` in `.env` makes every stack share one copy of the libvirt
+provider instead of downloading 26 MB per stack.

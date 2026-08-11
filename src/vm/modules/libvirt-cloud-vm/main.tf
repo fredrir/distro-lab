@@ -130,6 +130,10 @@ resource "libvirt_domain" "vm" {
     apic = {}
   }
 
+  cpu = {
+    mode = "host-passthrough"
+  }
+
   os = {
     type         = "hvm"
     type_arch    = "x86_64"
@@ -216,11 +220,6 @@ resource "libvirt_domain" "vm" {
             network = var.network
           }
         }
-
-        wait_for_ip = {
-          timeout = 300
-          source  = "lease"
-        }
       }
     ]
 
@@ -249,7 +248,6 @@ resource "libvirt_domain" "vm" {
       }
     ]
 
-    # Without this a failed boot is invisible: wait_for_ip just times out.
     # Gives `virsh console <name>` for firmware and cloud-init output.
     serials = [
       {

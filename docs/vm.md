@@ -43,6 +43,43 @@ src/vm/libvirt-ssh-proxy
 
 to resolve the current DHCP address through libvirt.
 
+Lab VMs are disposable, so their SSH host keys change every time a VM is
+rebuilt. The `*-dev` block therefore sets:
+
+```text
+UserKnownHostsFile /dev/null
+StrictHostKeyChecking no
+```
+
+Without this, every rebuild triggers `REMOTE HOST IDENTIFICATION HAS CHANGED`
+and the connection is refused until the old key is removed by hand. The
+tradeoff is that these hosts are not authenticated; the connection reaches them
+either from the host itself or through an already-authenticated hop to it.
+
+## Base images
+
+`TF_VAR_gentoo_dev_image_url` points at a dated build under Gentoo's
+`autobuilds/` directory. That directory keeps only the most recent handful of
+builds, so a pinned URL eventually returns 404 and a fresh create stops working.
+Gentoo publishes `latest-di-amd64-cloudinit.txt`, but it is a signed text file
+rather than a redirect, so it cannot be used as `image_url` directly.
+
+A local path avoids both the rotation and the download:
+
+```text
+file:///storage/distro-lab/ISOs/di-amd64-cloudinit-<build>.qcow2
+```
+
+Fetching over HTTPS runs at roughly 11 MB/s, so a 1.9 GiB image costs about
+2m45s; copying the same image from `ISOs/` runs at roughly 134 MB/s, or about
+15 seconds.
+
+Only change `image_url` when the VM is being built from scratch. Changing it on
+an existing VM replaces `libvirt_volume.base` while `libvirt_volume.root` is
+merely updated in place, and root is a qcow2 overlay backed by that exact file.
+Swapping the backing image for different content corrupts the VM silently.
+Destroy and recreate the stack instead.
+
 ## Cloud-image VMs
 
 `gentoo-dev` uses the `libvirt-cloud-vm` module. The base image is fetched from

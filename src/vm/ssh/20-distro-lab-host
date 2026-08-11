@@ -1,3 +1,6 @@
 Host *-dev
 User fredrir
 ProxyCommand ~/.local/bin/libvirt-ssh-proxy %h %p
+UserKnownHostsFile /dev/null
+StrictHostKeyChecking no
+LogLevel ERROR
