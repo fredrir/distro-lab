@@ -64,21 +64,41 @@ builds, so a pinned URL eventually returns 404 and a fresh create stops working.
 Gentoo publishes `latest-di-amd64-cloudinit.txt`, but it is a signed text file
 rather than a redirect, so it cannot be used as `image_url` directly.
 
-A local path avoids both the rotation and the download:
+`gentoo-dev` therefore pins a local image kept in `ISOs/`:
 
 ```text
-file:///storage/distro-lab/ISOs/di-amd64-cloudinit-<build>.qcow2
+TF_VAR_gentoo_dev_image_url="file://${TF_VAR_distro_lab_path}/ISOs/di-amd64-cloudinit-20260809T143052Z.qcow2"
 ```
 
 Fetching over HTTPS runs at roughly 11 MB/s, so a 1.9 GiB image costs about
-2m45s; copying the same image from `ISOs/` runs at roughly 134 MB/s, or about
-15 seconds.
+2m45s. Copying from `ISOs/` makes a full destroy and recreate of the whole stack
+take about 3 seconds.
 
-Only change `image_url` when the VM is being built from scratch. Changing it on
-an existing VM replaces `libvirt_volume.base` while `libvirt_volume.root` is
-merely updated in place, and root is a qcow2 overlay backed by that exact file.
-Swapping the backing image for different content corrupts the VM silently.
-Destroy and recreate the stack instead.
+## Updating a pinned image
+
+Download the build, verify it against Gentoo's signed digests, then repoint
+`.env`:
+
+```bash
+build=20260811T083102Z
+base=https://distfiles.gentoo.org/releases/amd64/autobuilds/$build
+
+curl -O --output-dir ISOs "$base/di-amd64-cloudinit-$build.qcow2"
+curl -s "$base/di-amd64-cloudinit-$build.qcow2.DIGESTS" | grep -A1 "SHA512 HASH"
+sha512sum ISOs/di-amd64-cloudinit-$build.qcow2
+```
+
+Only change `image_url` as part of a rebuild:
+
+```bash
+make gentoo-dev/destroy
+make gentoo-dev/apply
+```
+
+Applying the change to a running VM replaces `libvirt_volume.base` while
+`libvirt_volume.root` is merely updated in place, and root is a qcow2 overlay
+backed by that exact file. Swapping the backing image for different content
+corrupts the VM silently.
 
 ## Cloud-image VMs
 
