@@ -1,27 +1,55 @@
 # Distro Lab
 
+Bare-metal and virtual Linux distro lab hosted from Arch Linux.
 
+The lab keeps distro experiments separate from the main Arch installation while providing shared storage, reusable VM infrastructure, and persistent per-distro data.
 
+## Layout
+distro-lab/
+├── src/        # tracked configuration and infrastructure
+├── images/     # VM disk images
+├── ISOs/       # installation media
+├── roots/      # mountpoints for bare-metal roots
+├── EFI/        # LABEFI mountpoint
+└── storage/    # persistent per-distro data
+
+## Documentation
+- [`docs/architecture.md`](./docs/architecture.md) — host, disks, LVM, storage and state.
+    
+- [`docs/workflows.md`](./docs/workflows.md) — common VM and bare-metal workflows.
 
 ## `src/`
 
 ### `distros/`
 
-Sectioned by `<distro-name>-<purpose>/`
+Distros are organized as:
 
-- `<distro-name>`
-- - Name of distro. e.g `gentoo` or `nixos`
+```text
+<distro-name>-<purpose>/
+```
 
-- `<purpose>`
-- - `dev` for dev work, usually used in vm's, and for dev needs like compiling builds.
-- - `main` mostly for bare metal testing.
+Examples:
 
-#### `distros/<distro-name>-<purpose>/config`
+```text
+nixos-main   # bare-metal NixOS experiment
+nixos-dev    # NixOS development VM
+gentoo-dev   # Gentoo development VM
+```
 
-Configuration of the distro. 
-- e.g `config/configuration.nix`
+Purposes:
 
-#### `distros/<distro-name>-<purpose>/tofu`
+- `dev` — development environment, normally a VM.
+    
+- `main` — bare-metal distro testing.
+    
 
-Open tofu 
+Each distro may contain:
 
+```text
+config/      # distro configuration
+tofu/        # OpenTofu infrastructure
+```
+
+### `vm/`
+
+Shared libvirt/OpenTofu infrastructure:
