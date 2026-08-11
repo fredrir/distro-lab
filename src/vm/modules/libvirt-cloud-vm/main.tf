@@ -1,4 +1,14 @@
 locals {
+  # Derive a stable MAC from the VM name, instead; 52:54:00 is the QEMU OUI.
+  mac_digest = substr(md5(var.name), 0, 6)
+
+  mac_address = join(":", [
+    "52", "54", "00",
+    substr(local.mac_digest, 0, 2),
+    substr(local.mac_digest, 2, 2),
+    substr(local.mac_digest, 4, 2),
+  ])
+
   cloud_config = {
     hostname         = var.name
     manage_etc_hosts = true
@@ -113,13 +123,42 @@ resource "libvirt_domain" "vm" {
   memory_unit = "MiB"
   vcpu        = var.vcpus
 
+  # UEFI on x86_64 refuses to start without ACPI, and APIC is expected
+  # by any modern guest kernel.
+  features = {
+    acpi = true
+    apic = {}
+  }
+
   os = {
     type         = "hvm"
     type_arch    = "x86_64"
     type_machine = "q35"
 
+    # Distro cloud images are GPT with an EFI System Partition and no legacy
+    # MBR boot code, so they are unbootable under SeaBIOS (libvirt's default).
+    firmware = "efi"
+
+    # Pick the plain OVMF build: cloud image kernels/bootloaders are unsigned.
+    # Keep this order: the provider reads the features back in libvirt's own
+    # ordering, and any other order fails apply with "inconsistent result".
+    firmware_info = {
+      features = [
+        {
+          name    = "enrolled-keys"
+          enabled = "no"
+        },
+        {
+          name    = "secure-boot"
+          enabled = "no"
+        }
+      ]
+    }
+
     boot_devices = [
-      "hd"
+      {
+        dev = "hd"
+      }
     ]
   }
 
@@ -168,6 +207,10 @@ resource "libvirt_domain" "vm" {
           type = "virtio"
         }
 
+        mac = {
+          address = local.mac_address
+        }
+
         source = {
           network = {
             network = var.network
@@ -186,6 +229,26 @@ resource "libvirt_domain" "vm" {
         vnc = {
           auto_port = true
           listen    = "127.0.0.1"
+        }
+      }
+    ]
+
+    # Without this a failed boot is invisible: wait_for_ip just times out.
+    # Gives `virsh console <name>` for firmware and cloud-init output.
+    serials = [
+      {
+        target = {
+          type = "isa-serial"
+          port = 0
+        }
+      }
+    ]
+
+    consoles = [
+      {
+        target = {
+          type = "serial"
+          port = 0
         }
       }
     ]

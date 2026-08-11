@@ -31,5 +31,5 @@ module "gentoo_dev" {
 
   ssh_authorized_keys = local.ssh_keys
 
-  image_url = "https://distfiles.gentoo.org/releases/amd64/autobuilds/current-di-amd64-cloudinit/di-amd64-cloudinit-20260726T160854Z.qcow2"
+  image_url = "https://distfiles.gentoo.org/releases/amd64/autobuilds/20260810T204554Z/di-amd64-cloudinit-20260810T204554Z.qcow2"
 }
