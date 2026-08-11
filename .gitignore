@@ -17,6 +17,7 @@
 # Install media
 /ISOs/
 *.iso
+*.qcow2
 
 # Runtime mounts / state
 /mounts/
