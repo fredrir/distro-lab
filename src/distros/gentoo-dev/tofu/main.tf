@@ -4,7 +4,7 @@ provider "libvirt" {
 
 
 locals {
-  authorized_keys_file = "${path.module}/../../../ssh/authorized_keys"
+  authorized_keys_file = "../../../vm/ssh/authorized_keys"
 
   ssh_keys = [
     for line in split("\n", file(local.authorized_keys_file)) :
@@ -15,11 +15,11 @@ locals {
 
 
 module "gentoo_dev" {
-  source = "../../modules/libvirt-cloud-vm"
+  source = "../../../vm/modules/libvirt-cloud-vm"
 
   name = "gentoo-dev"
 
-  pool    = "vm-images"
+  pool    = "images"
   network = "default"
 
   memory_mib = 6144

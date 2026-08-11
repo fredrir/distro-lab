@@ -4,7 +4,7 @@ variable "name" {
 
 variable "pool" {
   type    = string
-  default = "vm-images"
+  default = "images"
 }
 
 variable "network" {
