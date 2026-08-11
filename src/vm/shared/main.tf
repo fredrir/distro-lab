@@ -1,13 +1,13 @@
 provider "libvirt" {
-  uri = "qemu:///system"
+  uri = var.libvirt_uri
 }
 
 resource "libvirt_pool" "images" {
-  name = "images"
+  name = var.pool
   type = "dir"
 
   target = {
-    path = "/storage/distro-lab/images"
+    path = "${var.distro_lab_path}/images"
   }
 
   create = {

@@ -28,3 +28,6 @@
 
 # ssh
 authorized_keys
+
+# Environment
+/.env

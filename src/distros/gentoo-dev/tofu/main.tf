@@ -1,16 +1,5 @@
 provider "libvirt" {
-  uri = "qemu:///system"
-}
-
-
-locals {
-  authorized_keys_file = "../../../vm/ssh/authorized_keys"
-
-  ssh_keys = [
-    for line in split("\n", file(local.authorized_keys_file)) :
-    trimspace(line)
-    if startswith(trimspace(line), "ssh-")
-  ]
+  uri = var.libvirt_uri
 }
 
 
@@ -19,17 +8,17 @@ module "gentoo_dev" {
 
   name = "gentoo-dev"
 
-  pool    = "images"
-  network = "default"
+  pool    = var.pool
+  network = var.network
 
-  memory_mib = 6144
-  vcpus      = 4
+  memory_mib = var.gentoo_dev_memory_mib
+  vcpus      = var.gentoo_dev_vcpus
 
-  disk_size_bytes = 53687091200 # 50 GiB
+  disk_size_bytes = var.gentoo_dev_disk_size_bytes
 
-  username = "fredrir"
+  username = var.username
 
-  ssh_authorized_keys = local.ssh_keys
+  ssh_authorized_keys = var.ssh_authorized_keys
 
-  image_url = "https://distfiles.gentoo.org/releases/amd64/autobuilds/20260810T204554Z/di-amd64-cloudinit-20260810T204554Z.qcow2"
+  image_url = var.gentoo_dev_image_url
 }
