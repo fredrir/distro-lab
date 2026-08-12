@@ -39,3 +39,8 @@ variable "username" {
 variable "ssh_authorized_keys" {
   type = list(string)
 }
+
+variable "cloud_config_extra" {
+  type    = any
+  default = {}
+}

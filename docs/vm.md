@@ -74,6 +74,16 @@ Fetching over HTTPS runs at roughly 11 MB/s, so a 1.9 GiB image costs about
 2m45s. Copying from `ISOs/` makes a full destroy and recreate of the whole stack
 take about 3 seconds.
 
+`ubuntu-dev` pins a local image for that second reason alone. Ubuntu's release
+URLs are stable, so nothing rots there:
+
+```text
+TF_VAR_ubuntu_dev_image_url="file://${TF_VAR_distro_lab_path}/ISOs/ubuntu-26.04-server-cloudimg-amd64.img"
+```
+
+The file is qcow2 despite the `.img` suffix, which is the format the module's
+base volume declares.
+
 ## Updating a pinned image
 
 Download the build, verify it against Gentoo's signed digests, then repoint
@@ -102,10 +112,62 @@ corrupts the VM silently.
 
 ## Cloud-image VMs
 
-`gentoo-dev` uses the `libvirt-cloud-vm` module. The base image is fetched from
-`TF_VAR_gentoo_dev_image_url`, and cloud-init creates the user and installs the
-keys from `TF_VAR_ssh_authorized_keys`. Applying the stack produces a VM that is
-reachable over SSH without any manual step.
+`gentoo-dev` and `ubuntu-dev` use the `libvirt-cloud-vm` module. The base image
+is fetched from that distro's `TF_VAR_*_image_url`, and cloud-init creates the
+user and installs the keys from `TF_VAR_ssh_authorized_keys`. Applying the stack
+produces a VM that is reachable over SSH without any manual step.
+
+## Provisioning a cloud VM
+
+Guest configuration lives with the distro, not in `.env`:
+
+```text
+src/distros/gentoo-dev/config/cloud-init.yaml
+```
+
+The stack reads that file and the module merges it over the cloud-config it
+generates, so anything cloud-init accepts works without adding OpenTofu
+variables. The generated half owns `hostname`, `users` and the SSH keys, because
+those come from the VM name and from `.env`; the file owns everything else.
+
+`.env` is deliberately not the place for this. It holds values that vary per
+machine — paths, the libvirt URI, sizes, keys — and it is not tracked. What a
+distro installs is part of the distro, so it belongs beside
+`nixos-dev/config/configuration.nix`.
+
+The file applies once, on the first boot of a given instance. Editing it does not
+re-provision a VM that already exists; the change takes effect on the next
+destroy and recreate.
+
+`packages:` is the more obvious cloud-init key to reach for, but cloud-init's
+Gentoo handler invokes a bare `emerge`, and the cloud image sets no
+`--getbinpkg` default, so a package list compiles from source. `runcmd` is used
+instead so the official signed binary host is requested explicitly:
+
+```yaml
+runcmd:
+  - emerge-webrsync
+  - emerge --getbinpkg --quiet app-emulation/qemu-guest-agent
+```
+
+The guest agent needs no service enabling. It ships a udev rule that sets
+`SYSTEMD_WANTS=qemu-guest-agent.service`, so it starts when the virtio channel
+declared by the module appears.
+
+This costs a portage tree sync on every fresh build, roughly 600 MiB, and needs
+working outbound networking in the guest. When neither is acceptable, install
+the packages once and pin the result as the base image in `ISOs/` instead, which
+keeps a rebuild at about three seconds.
+
+Ubuntu has neither problem, so `ubuntu-dev/config/cloud-init.yaml` reaches for
+`packages:` directly:
+
+```yaml
+package_update: true
+
+packages:
+  - qemu-guest-agent
+```
 
 ## ISO-installed VMs
 

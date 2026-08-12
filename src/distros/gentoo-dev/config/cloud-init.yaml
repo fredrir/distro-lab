@@ -1,0 +1,3 @@
+runcmd:
+  - emerge-webrsync
+  - emerge --getbinpkg --quiet app-emulation/qemu-guest-agent

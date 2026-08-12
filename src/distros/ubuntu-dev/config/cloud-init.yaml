@@ -1,0 +1,4 @@
+package_update: true
+
+packages:
+  - qemu-guest-agent

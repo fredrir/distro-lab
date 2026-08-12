@@ -18,19 +18,18 @@ variable "ssh_authorized_keys" {
   type = list(string)
 }
 
-variable "gentoo_dev_memory_mib" {
+variable "ubuntu_dev_memory_mib" {
   type = number
 }
 
-variable "gentoo_dev_vcpus" {
+variable "ubuntu_dev_vcpus" {
   type = number
 }
 
-variable "gentoo_dev_disk_size_bytes" {
+variable "ubuntu_dev_disk_size_bytes" {
   type = number
 }
 
-variable "gentoo_dev_image_url" {
+variable "ubuntu_dev_image_url" {
   type = string
 }
-

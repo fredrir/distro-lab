@@ -34,6 +34,7 @@ Examples:
 nixos-main   # bare-metal NixOS experiment
 nixos-dev    # NixOS development VM
 gentoo-dev   # Gentoo development VM
+ubuntu-dev   # Ubuntu development VM
 ```
 
 Purposes:
@@ -66,6 +67,10 @@ guest is configured by cloud-init. NixOS publishes no such image, so `nixos-dev`
 uses `libvirt-iso-vm`: OpenTofu owns the virtual hardware, and the guest comes
 from `src/distros/nixos-dev/config/`.
 
+Either way the modules own hardware only. What a guest installs and how it is
+configured lives in that distro's `config/`, tracked in git —
+`configuration.nix` for NixOS, `cloud-init.yaml` for a cloud image.
+
 ## Configuration
 
 All environment-specific values live in `.env` at the repository root. Copy the
@@ -90,8 +95,8 @@ The `Makefile` sources `.env` and runs OpenTofu against a chosen stack:
 make <stack>/<action>
 ```
 
-Stacks are `shared`, `gentoo-dev` and `nixos-dev`. Actions are `init`,
-`validate`, `plan`, `apply`, `destroy`, `refresh`, `output` and `show`.
+Stacks are `shared`, `gentoo-dev`, `nixos-dev` and `ubuntu-dev`. Actions are
+`init`, `validate`, `plan`, `apply`, `destroy`, `refresh`, `output` and `show`.
 
 ```bash
 make shared/apply

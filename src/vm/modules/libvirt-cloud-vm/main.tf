@@ -9,28 +9,32 @@ locals {
     substr(local.mac_digest, 4, 2),
   ])
 
-  cloud_config = {
-    hostname         = var.name
-    manage_etc_hosts = true
+  cloud_config = merge(
+    {
+      hostname         = var.name
+      manage_etc_hosts = true
 
-    ssh_pwauth   = false
-    disable_root = true
+      ssh_pwauth   = false
+      disable_root = true
 
-    users = [
-      {
-        name        = var.username
-        shell       = "/bin/bash"
-        groups      = ["wheel"]
-        lock_passwd = true
+      users = [
+        {
+          name        = var.username
+          shell       = "/bin/bash"
+          groups      = ["wheel"]
+          lock_passwd = true
 
-        sudo = [
-          "ALL=(ALL) NOPASSWD:ALL"
-        ]
+          sudo = [
+            "ALL=(ALL) NOPASSWD:ALL"
+          ]
 
-        ssh_authorized_keys = var.ssh_authorized_keys
-      }
-    ]
-  }
+          ssh_authorized_keys = var.ssh_authorized_keys
+        }
+      ]
+    },
+
+    var.cloud_config_extra,
+  )
 }
 
 

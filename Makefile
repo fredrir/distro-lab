@@ -4,12 +4,13 @@ SHELL := /bin/bash
 ROOT := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 ENV_FILE ?= $(ROOT)/.env
 
-STACKS := shared gentoo-dev nixos-dev
+STACKS := shared gentoo-dev nixos-dev ubuntu-dev
 ACTIONS := init validate plan apply destroy refresh output show
 
 DIR_shared := src/vm/shared
 DIR_gentoo-dev := src/distros/gentoo-dev/tofu
 DIR_nixos-dev := src/distros/nixos-dev/tofu
+DIR_ubuntu-dev := src/distros/ubuntu-dev/tofu
 
 TOFU_ARGS ?=
 FAST ?=
