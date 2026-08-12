@@ -89,31 +89,61 @@ silently falling back.
 
 ## Usage
 
-The `Makefile` sources `.env` and runs OpenTofu against a chosen stack:
+The `justfile` loads `.env` and drives both OpenTofu and libvirt. `just` on its
+own lists every recipe, grouped:
 
 ```bash
-make <stack>/<action>
+just
 ```
 
-Stacks are `shared`, `gentoo-dev`, `nixos-dev` and `ubuntu-dev`. Actions are
-`init`, `validate`, `plan`, `apply`, `destroy`, `refresh`, `output` and `show`.
+Check the host has everything the lab depends on before anything else:
 
 ```bash
-make shared/apply
-make nixos-dev/plan
-make nixos-dev/apply TOFU_ARGS=-auto-approve
+just doctor
 ```
 
-`make env` prints the variables that would be handed to OpenTofu, and `make fmt`
-formats everything under `src/`.
+### Stacks
 
-`FAST=1` adds `-refresh=false -lock=false` to `plan`, `apply` and `destroy`,
-skipping the reconciliation pass against libvirt. Use it when nothing has
-changed the VMs behind OpenTofu's back:
+Stacks are `shared`, `gentoo-dev`, `nixos-dev` and `ubuntu-dev`. The stack is an
+argument, not part of the recipe name:
 
 ```bash
-make nixos-dev/plan FAST=1
+just apply shared
+just plan nixos-dev
+just rebuild nixos-dev
 ```
+
+`init`, `validate`, `plan`, `apply`, `refresh`, `output` and `show` pass straight
+through to OpenTofu. `destroy` and `rebuild` prompt once and then run
+unattended, so nothing needs `-auto-approve`. Anything else is still reachable
+by appending arguments:
+
+```bash
+just plan nixos-dev -target=module.nixos_dev.libvirt_domain.vm
+```
+
+`plan-fast` and `apply-fast` add `-refresh=false -lock=false`, skipping the
+reconciliation pass against libvirt. Use them when nothing has changed the VMs
+behind OpenTofu's back:
+
+```bash
+just plan-fast nixos-dev
+```
+
+### VMs
+
+```bash
+just vms                # name, state, address, vCPU, memory
+just ip nixos-dev
+just ssh nixos-dev
+just console nixos-dev
+just start nixos-dev
+just pool
+just df
+```
+
+`just status` puts what OpenTofu believes next to what libvirt actually has,
+which is how a VM created or deleted outside OpenTofu shows up.
 
 `TF_PLUGIN_CACHE_DIR` in `.env` makes every stack share one copy of the libvirt
-provider instead of downloading 26 MB per stack.
+provider instead of downloading 26 MB per stack. `just init` creates it.

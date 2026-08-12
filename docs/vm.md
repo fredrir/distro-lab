@@ -3,36 +3,42 @@
 VMs are managed with libvirt and OpenTofu.
 
 Every VM is described by an OpenTofu stack under `src/distros/<distro>/tofu/`,
-driven through the root `Makefile`, which sources `.env` first:
+driven through the root `justfile`, which loads `.env` first:
 
 ```bash
-make nixos-dev/plan
-make nixos-dev/apply
+just plan nixos-dev
+just apply nixos-dev
 ```
 
 The `shared` stack owns the libvirt storage pool and must be applied before any
 distro stack:
 
 ```bash
-make shared/apply
+just apply shared
 ```
 
 List VMs:
 
 ```bash
-virsh -c qemu:///system list --all
+just vms
+```
+
+Compare that against what OpenTofu believes:
+
+```bash
+just status
 ```
 
 Inspect a VM:
 
 ```bash
-virsh -c qemu:///system dumpxml nixos-dev
+just xml nixos-dev
 ```
 
 SSH into a development VM:
 
 ```bash
-ssh nixos-dev
+just ssh nixos-dev
 ```
 
 The SSH config uses:
@@ -101,8 +107,7 @@ sha512sum ISOs/di-amd64-cloudinit-$build.qcow2
 Only change `image_url` as part of a rebuild:
 
 ```bash
-make gentoo-dev/destroy
-make gentoo-dev/apply
+just rebuild gentoo-dev
 ```
 
 Applying the change to a running VM replaces `libvirt_volume.base` while
@@ -189,7 +194,7 @@ disk and the attached ISO is simply ignored.
 Install into a newly applied VM over the serial console:
 
 ```bash
-virsh -c qemu:///system console nixos-dev
+just console nixos-dev
 ```
 
 Partition, mount, then copy the tracked configuration into place:
@@ -207,11 +212,10 @@ with `nixos-rebuild`, not by re-applying OpenTofu.
 ## Rebuilding a VM from scratch
 
 `tofu destroy` removes the domain and its root volume, discarding the installed
-system:
+system. `rebuild` does that and applies again, confirming once:
 
 ```bash
-make nixos-dev/destroy
-make nixos-dev/apply
+just rebuild nixos-dev
 ```
 
 The libvirt storage pool and anything under `storage/<distro>/` survive this.
