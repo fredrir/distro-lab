@@ -1,0 +1,133 @@
+{
+  "dlab-ubuntu": {
+    "kind": "distro",
+    "distro": "ubuntu",
+    "title": "Ubuntu 26.04 cloud sandbox",
+    "source": {
+      "type": "cloud",
+      "image": "ISOs/ubuntu-26.04-server-cloudimg-amd64.img"
+    },
+    "net": { "host": 10 },
+    "memory_mib": 8192,
+    "current_memory_mib": 4096,
+    "vcpu": 16,
+    "vcpu_current": 4,
+    "disk_size_bytes": 53687091200,
+    "idle": { "minutes": 60, "action": "managedsave" }
+  },
+
+  "dlab-gentoo": {
+    "kind": "distro",
+    "distro": "gentoo",
+    "title": "Gentoo cloud sandbox",
+    "source": {
+      "type": "cloud",
+      "image": "ISOs/di-amd64-cloudinit-20260809T143052Z.qcow2"
+    },
+    "net": { "host": 11 },
+    "memory_mib": 8192,
+    "current_memory_mib": 6144,
+    "vcpu": 12,
+    "vcpu_current": 4,
+    "cpu_shares": 512,
+    "disk_size_bytes": 53687091200,
+    "idle": { "minutes": 60, "action": "managedsave" }
+  },
+
+  "dlab-nixos": {
+    "kind": "distro",
+    "distro": "nixos",
+    "title": "NixOS sandbox",
+    "source": {
+      "type": "nix",
+      "host": "dlab-nixos"
+    },
+    "net": { "host": 12 },
+    "memory_mib": 8192,
+    "current_memory_mib": 4096,
+    "vcpu": 16,
+    "vcpu_current": 4,
+    "disk_size_bytes": 68719476736,
+    "idle": { "minutes": 60, "action": "managedsave" }
+  },
+
+  "dlab-portfolio": {
+    "kind": "project",
+    "distro": "nixos",
+    "title": "portfolio",
+    "source": {
+      "type": "nix",
+      "host": "dlab-portfolio"
+    },
+    "net": { "host": 13 },
+    "memory_mib": 8192,
+    "current_memory_mib": 4096,
+    "vcpu": 16,
+    "vcpu_current": 4,
+    "disk_size_bytes": 68719476736,
+    "work_disk_bytes": 53687091200,
+    "idle": { "minutes": 60, "action": "managedsave" },
+    "repo": "git@github.com:fredrir/portfolio.git",
+    "secrets": ["deploy-key"]
+  },
+
+  "dlab-archtex": {
+    "kind": "project",
+    "distro": "nixos",
+    "title": "ArchTeX",
+    "source": {
+      "type": "nix",
+      "host": "dlab-archtex"
+    },
+    "net": { "host": 14 },
+    "memory_mib": 16384,
+    "current_memory_mib": 8192,
+    "vcpu": 12,
+    "vcpu_current": 6,
+    "cpu_shares": 512,
+    "disk_size_bytes": 137438953472,
+    "work_disk_bytes": 107374182400,
+    "idle": { "minutes": 90, "action": "managedsave" },
+    "repo": "git@github.com:fredrir/ArchTeX.git",
+    "secrets": ["deploy-key"]
+  },
+
+  "dlab-nsql": {
+    "kind": "project",
+    "distro": "nixos",
+    "title": "nsql - embedded neovim SQL editor",
+    "source": {
+      "type": "nix",
+      "host": "dlab-nsql"
+    },
+    "net": { "host": 15 },
+    "memory_mib": 8192,
+    "current_memory_mib": 4096,
+    "vcpu": 16,
+    "vcpu_current": 4,
+    "disk_size_bytes": 68719476736,
+    "work_disk_bytes": 53687091200,
+    "idle": { "minutes": 60, "action": "managedsave" },
+    "repo": "git@github.com:fredrir/nsql.git",
+    "secrets": ["deploy-key"]
+  },
+
+  "dlab-cuda": {
+    "kind": "project",
+    "distro": "nixos",
+    "title": "CUDA C/C++ on GTX 1070 Ti",
+    "source": {
+      "type": "nix",
+      "host": "dlab-cuda"
+    },
+    "net": { "host": 16 },
+    "memory_mib": 8192,
+    "current_memory_mib": 8192,
+    "vcpu": 16,
+    "vcpu_current": 8,
+    "disk_size_bytes": 137438953472,
+    "work_disk_bytes": 53687091200,
+    "gpu_pci": [],
+    "idle": { "minutes": 240, "action": "shutdown" }
+  }
+}

@@ -17,3 +17,11 @@ variable "network" {
 variable "subnet_prefix" {
   type = string
 }
+
+variable "username" {
+  type = string
+}
+
+variable "ssh_authorized_keys" {
+  type = list(string)
+}

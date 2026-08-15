@@ -1,6 +1,12 @@
-Host *-dev
-User fredrir
-ProxyCommand ~/.local/bin/libvirt-ssh-proxy %h %p
-UserKnownHostsFile /dev/null
-StrictHostKeyChecking no
-LogLevel ERROR
+Host dlab-*
+    User fredrir
+    ProxyCommand ~/.local/bin/libvirt-ssh-proxy %h %p
+    UserKnownHostsFile /dev/null
+    StrictHostKeyChecking no
+    LogLevel ERROR
+    ConnectTimeout 300
+    ServerAliveInterval 30
+    ServerAliveCountMax 6
+    ControlMaster auto
+    ControlPath ~/.ssh/cm-%r@%h:%p
+    ControlPersist 10m

@@ -2,8 +2,7 @@
 # Manual edits may be lost in future updates.
 
 provider "registry.opentofu.org/dmacvicar/libvirt" {
-  version     = "0.9.8"
-  constraints = "0.9.8"
+  version = "0.9.8"
   hashes = [
     "h1:/9TSq9ibeojseTyT6Jx3z/dbvT5uw8ka3/18NKonrQc=",
     "h1:BN5hy1RaHlpcV0BDJYrSOEklK4YNdZCpiXOOGn0ce9k=",

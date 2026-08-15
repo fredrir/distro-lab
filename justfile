@@ -2,9 +2,9 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 set dotenv-load
 set dotenv-required
 
-stacks := "shared gentoo-dev nixos-dev ubuntu-dev"
+registry := "src/labs/labs.json"
 
-resolve := 'resolve_dir() { case "$1" in shared) echo src/vm/shared ;; gentoo-dev|nixos-dev|ubuntu-dev) echo src/distros/$1/tofu ;; *) echo "unknown stack: $1 (stacks: shared gentoo-dev nixos-dev ubuntu-dev)" >&2 ; return 1 ;; esac ; } ;'
+resolve := 'resolve_dir() { case "$1" in shared) echo src/vm/shared ;; *) if [[ -d "src/labs/$1/tofu" ]]; then echo "src/labs/$1/tofu" ; else echo "unknown stack: $1 (try: just labs)" >&2 ; return 1 ; fi ;; esac ; } ; labs() { for d in src/labs/*/tofu ; do [[ -d "$d" ]] || continue ; n=$(basename "$(dirname "$d")") ; [[ "$n" == _* ]] && continue ; echo "$n" ; done ; } ; stacks() { echo shared ; labs ; } ; spec() { jq -r --arg l "$1" "$2" src/labs/labs.json ; } ;'
 
 [private]
 default:
@@ -15,7 +15,7 @@ default:
 vms:
     #!/usr/bin/env bash
     set -euo pipefail
-    printf '%-12s %-9s %-16s %5s %8s\n' NAME STATE IP VCPU MEM
+    printf '%-16s %-9s %-16s %5s %8s\n' NAME STATE IP VCPU MEM
     for vm in $(virsh -c "$TF_VAR_libvirt_uri" list --all --name); do
         info=$(virsh -c "$TF_VAR_libvirt_uri" dominfo "$vm")
         state=$(sed -n 's/^State: *//p' <<<"$info")
@@ -24,7 +24,7 @@ vms:
         mem=$(awk -v k="$kib" 'BEGIN {printf "%.1fG", k / 1048576}')
         ip=$(virsh -c "$TF_VAR_libvirt_uri" domifaddr "$vm" --source lease 2>/dev/null |
             awk '$3 == "ipv4" {split($4, a, "/"); print a[1]; exit}' || true)
-        printf '%-12s %-9s %-16s %5s %8s\n' "$vm" "$state" "${ip:--}" "$vcpu" "$mem"
+        printf '%-16s %-9s %-16s %5s %8s\n' "$vm" "$state" "${ip:--}" "$vcpu" "$mem"
     done
 
 # Current DHCP lease address of a VM
@@ -57,6 +57,61 @@ stop vm:
 reboot vm:
     virsh -c "$TF_VAR_libvirt_uri" reboot {{ vm }}
 
+# Boot a lab and wait for it to answer on SSH
+[group('vm')]
+up lab:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    {{ resolve }}
+    mkdir -p "storage/{{ lab }}/state"
+    state=$(virsh -c "$TF_VAR_libvirt_uri" domstate "{{ lab }}" 2>/dev/null || echo undefined)
+    if [[ "$state" != running && "${DLAB_FORCE:-0}" != 1 ]]; then
+        need=$(spec {{ lab }} '.[$l].memory_mib // 8192')
+        avail=$(( $(awk '/^MemAvailable:/ {print $2}' /proc/meminfo) / 1024 ))
+        reserve=4096
+        if (( avail - reserve < need )); then
+            echo "refusing to start {{ lab }}: needs ${need} MiB, only $(( avail - reserve )) MiB spendable (${avail} MiB available, ${reserve} MiB reserved for the host)" >&2
+            echo "virtiofs inhibits ram discard, so a lab's host RSS is its full memory_mib regardless of the balloon." >&2
+            echo "awake now:" >&2
+            for d in $(virsh -c "$TF_VAR_libvirt_uri" list --name); do
+                [[ "$d" == dlab-* ]] && echo "  $d    stop with: just down $d" >&2
+            done
+            echo "override with DLAB_FORCE=1 just up {{ lab }}" >&2
+            exit 1
+        fi
+    fi
+    case "$state" in
+        undefined)     echo "{{ lab }} is not defined, run: just apply {{ lab }}" >&2 ; exit 1 ;;
+        running)       ;;
+        paused)        virsh -c "$TF_VAR_libvirt_uri" resume "{{ lab }}" ;;
+        pmsuspended)   virsh -c "$TF_VAR_libvirt_uri" dompmwakeup "{{ lab }}" ;;
+        crashed)       virsh -c "$TF_VAR_libvirt_uri" destroy "{{ lab }}" ; virsh -c "$TF_VAR_libvirt_uri" start "{{ lab }}" ;;
+        *)             virsh -c "$TF_VAR_libvirt_uri" start "{{ lab }}" ;;
+    esac
+    ip="$TF_VAR_subnet_prefix.$(spec {{ lab }} '.[$l].net.host')"
+    for _ in $(seq 1 300); do
+        nc -z -w1 "$ip" 22 2>/dev/null && { echo "{{ lab }} up on $ip"; exit 0; }
+        sleep 1
+    done
+    echo "{{ lab }} did not answer on $ip:22" >&2
+    exit 1
+
+# Stop a lab using the idle action from the registry
+[group('vm')]
+down lab:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    {{ resolve }}
+    action=$(spec {{ lab }} '.[$l].idle.action // "shutdown"')
+    if virsh -c "$TF_VAR_libvirt_uri" dumpxml "{{ lab }}" 2>/dev/null | grep -q '<hostdev'; then
+        action=shutdown
+    fi
+    case "$action" in
+        managedsave) virsh -c "$TF_VAR_libvirt_uri" managedsave "{{ lab }}" ;;
+        none)        echo "{{ lab }} has idle.action none, not stopping" >&2 ;;
+        *)           virsh -c "$TF_VAR_libvirt_uri" shutdown --mode agent,acpi "{{ lab }}" ;;
+    esac
+
 # Dump the libvirt XML of a VM
 [group('vm')]
 xml vm:
@@ -82,8 +137,8 @@ status:
     #!/usr/bin/env bash
     set -euo pipefail
     {{ resolve }}
-    printf '%-12s %-10s %-8s %s\n' STACK RESOURCES DOMAIN STATE
-    for stack in {{ stacks }}; do
+    printf '%-16s %-10s %-8s %s\n' STACK RESOURCES DOMAIN STATE
+    for stack in $(stacks); do
         dir=$(resolve_dir "$stack")
         if [[ -f "$dir/terraform.tfstate" ]]; then
             count=$(tofu -chdir="$dir" state list 2>/dev/null | wc -l || true)
@@ -91,7 +146,7 @@ status:
             count=0
         fi
         if [[ "$stack" == shared ]]; then
-            printf '%-12s %-10s %-8s %s\n' "$stack" "$count" - -
+            printf '%-16s %-10s %-8s %s\n' "$stack" "$count" - -
             continue
         fi
         if state=$(virsh -c "$TF_VAR_libvirt_uri" domstate "$stack" 2>/dev/null); then
@@ -100,7 +155,7 @@ status:
             domain=no
             state=-
         fi
-        printf '%-12s %-10s %-8s %s\n' "$stack" "$count" "$domain" "$state"
+        printf '%-16s %-10s %-8s %s\n' "$stack" "$count" "$domain" "$state"
     done
 
 # Check every host dependency the lab quietly relies on
@@ -108,6 +163,7 @@ status:
 doctor:
     #!/usr/bin/env bash
     set -uo pipefail
+    {{ resolve }}
     fail=0
     ok()  { printf '  ok    %s\n' "$1"; }
     bad() { printf '  FAIL  %s\n' "$1"; fail=1; }
@@ -136,7 +192,7 @@ doctor:
     fi
 
     echo "environment"
-    declared=$(sed -n 's/^variable "\(.*\)".*/\1/p' src/vm/shared/variables.tf src/distros/*/tofu/variables.tf | sort -u)
+    declared=$(sed -n 's/^variable "\(.*\)".*/\1/p' src/vm/shared/variables.tf src/labs/*/tofu/variables.tf | sort -u)
     missing=0
     for var in $declared; do
         name="TF_VAR_$var"
@@ -159,18 +215,68 @@ doctor:
         bad "~/.ssh/config.d/20-distro-lab-host missing, symlink src/vm/ssh/20-distro-lab-host"
     fi
 
+    echo "registry"
+    if jq -e . {{ registry }} >/dev/null 2>&1; then ok "{{ registry }} parses"; else bad "{{ registry }} is not valid JSON"; fi
+    pending=$(for lab in $(jq -r 'keys[]' {{ registry }}); do [[ -d "src/labs/$lab/tofu" ]] || echo "$lab"; done | tr '\n' ' ')
+    [[ -n "$pending" ]] && printf '  note  declared but not built yet: %s\n' "$pending"
+    for lab in $(labs); do
+        jq -e --arg l "$lab" 'has($l)' {{ registry }} >/dev/null || bad "src/labs/$lab has no registry entry"
+    done
+    dupes=$(jq -r '[.[].net.host] | group_by(.) | map(select(length > 1)) | flatten | @csv' {{ registry }})
+    if [[ -z "$dupes" ]]; then ok "net.host octets unique"; else bad "duplicate net.host: $dupes"; fi
+
     echo "media"
-    for url in "$TF_VAR_gentoo_dev_image_url" "$TF_VAR_ubuntu_dev_image_url"; do
-        if [[ "$url" != file://* ]]; then
-            ok "$url (remote)"
-        elif [[ -f "${url#file://}" ]]; then
-            ok "${url#file://}"
+    for lab in $(labs); do
+        kind=$(spec "$lab" '.[$l].source.type')
+        if [[ "$kind" == nix ]]; then
+            if [[ -f "images/$lab-base.qcow2" ]]; then ok "images/$lab-base.qcow2"; else bad "images/$lab-base.qcow2 missing, run: just image $lab"; fi
         else
-            bad "${url#file://} missing"
+            img=$(spec "$lab" '.[$l].source.image')
+            case "$img" in
+                *://*) ok "$img (remote)" ;;
+                *) if [[ -f "$TF_VAR_distro_lab_path/$img" ]]; then ok "$img"; else bad "$img missing"; fi ;;
+            esac
         fi
     done
-    iso="$TF_VAR_distro_lab_path/ISOs/$TF_VAR_nixos_dev_iso"
-    if [[ -f "$iso" ]]; then ok "$iso"; else bad "$iso missing"; fi
+
+    echo "virtiofs"
+    if [[ -x /usr/lib/virtiofsd ]]; then ok "/usr/lib/virtiofsd"; else bad "virtiofsd missing, pacman -S virtiofsd"; fi
+    if [[ -f /usr/share/qemu/vhost-user/50-virtiofsd.json ]]; then ok "virtiofsd capability descriptor"; else bad "no vhost-user descriptor, managedsave of a lab with a share will fail"; fi
+    for lab in $(labs); do
+        if [[ -d "storage/$lab/state" ]]; then
+            [[ "$(stat -c '%u' "storage/$lab/state")" == "$(id -u)" ]] || bad "storage/$lab/state is not owned by $(id -un)"
+        else
+            bad "storage/$lab/state missing, virtiofsd will refuse to start"
+        fi
+    done
+    ok "state shares for $(labs | wc -l) built labs"
+
+    echo "network"
+    live=$(virsh -c "$TF_VAR_libvirt_uri" net-dumpxml "$TF_VAR_network" 2>/dev/null || true)
+    for lab in $(jq -r 'keys[]' {{ registry }}); do
+        grep -q "name='$lab'" <<<"$live" || bad "$lab has no DHCP reservation, run: just apply shared"
+    done
+    [[ -n "$live" ]] && ok "$(jq -r 'keys | length' {{ registry }}) reservations checked"
+
+    echo "memory"
+    ksm=$(cat /sys/kernel/mm/ksm/run 2>/dev/null || echo 0)
+    if [[ "$ksm" != 0 ]]; then
+        bad "KSM is on but every lab has a virtiofs share; memfd-shared guest RAM is never scanned"
+    else
+        ok "KSM off (correct: virtiofs forces shared memory backing)"
+    fi
+    if [[ "$(swapon --show --noheadings | wc -l)" -gt 0 ]]; then
+        ok "swap present"
+    else
+        bad "no swap: virtiofs guest RAM is unreclaimable shmem, the OOM killer is the only relief. enable zram"
+    fi
+    committed=0
+    for d in $(virsh -c "$TF_VAR_libvirt_uri" list --name); do
+        [[ "$d" == dlab-* ]] || continue
+        committed=$(( committed + $(spec "$d" '.[$l].memory_mib // 8192') ))
+    done
+    avail=$(( $(awk '/^MemAvailable:/ {print $2}' /proc/meminfo) / 1024 ))
+    printf '  note  %s MiB committed by awake labs, %s MiB available\n' "$committed" "$avail"
 
     exit $fail
 
@@ -207,12 +313,25 @@ plan-fast stack *args:
 # Apply a stack
 [group('tofu')]
 apply stack *args:
-    @{{ resolve }} dir=$(resolve_dir {{ stack }}) && tofu -chdir="$dir" apply {{ args }}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    {{ resolve }}
+    dir=$(resolve_dir {{ stack }})
+    if [[ "{{ stack }}" != shared ]]; then
+        mkdir -p "storage/{{ stack }}/state"
+        virsh -c "$TF_VAR_libvirt_uri" managedsave-remove "{{ stack }}" 2>/dev/null || true
+    fi
+    tofu -chdir="$dir" apply {{ args }}
 
 # Apply a stack without reconciling state against libvirt
 [group('tofu')]
 apply-fast stack *args:
-    @{{ resolve }} dir=$(resolve_dir {{ stack }}) && tofu -chdir="$dir" apply -refresh=false -lock=false -compact-warnings {{ args }}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    {{ resolve }}
+    dir=$(resolve_dir {{ stack }})
+    [[ "{{ stack }}" == shared ]] || mkdir -p "storage/{{ stack }}/state"
+    tofu -chdir="$dir" apply -refresh=false -lock=false -compact-warnings {{ args }}
 
 # Reconcile stack state against libvirt
 [group('tofu')]
@@ -233,7 +352,12 @@ show stack:
 [confirm('destroy this stack and everything installed in it? [y/N]')]
 [group('tofu')]
 destroy stack:
-    @{{ resolve }} dir=$(resolve_dir {{ stack }}) && tofu -chdir="$dir" destroy -auto-approve
+    #!/usr/bin/env bash
+    set -euo pipefail
+    {{ resolve }}
+    dir=$(resolve_dir {{ stack }})
+    [[ "{{ stack }}" == shared ]] || virsh -c "$TF_VAR_libvirt_uri" managedsave-remove "{{ stack }}" 2>/dev/null || true
+    tofu -chdir="$dir" destroy -auto-approve
 
 # Destroy and recreate a stack from scratch
 [confirm('rebuild this stack from scratch, discarding the installed system? [y/N]')]
@@ -243,5 +367,9 @@ rebuild stack:
     set -euo pipefail
     {{ resolve }}
     dir=$(resolve_dir {{ stack }})
+    if [[ "{{ stack }}" != shared ]]; then
+        mkdir -p "storage/{{ stack }}/state"
+        virsh -c "$TF_VAR_libvirt_uri" managedsave-remove "{{ stack }}" 2>/dev/null || true
+    fi
     tofu -chdir="$dir" destroy -auto-approve
     tofu -chdir="$dir" apply -auto-approve
