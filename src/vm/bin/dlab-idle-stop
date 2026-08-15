@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+VIRSH=/usr/bin/virsh
+JQ=/usr/bin/jq
+URI=qemu:///system
+
+REPO=${DLAB_REPO:-/storage/distro-lab}
+REGISTRY="$REPO/src/labs/labs.json"
+
+ALIVE_MAX=180
+
+log() { printf 'dlab-idle-stop: %s\n' "$*"; }
+
+[[ -f "$REGISTRY" ]] || { log "no registry at $REGISTRY"; exit 1; }
+
+now=$(date +%s)
+
+mtime() { stat -c %Y "$1" 2>/dev/null || echo 0; }
+
+for lab in $("$JQ" -r 'keys[]' "$REGISTRY"); do
+    action=$("$JQ" -r --arg l "$lab" '.[$l].idle.action // "managedsave"' "$REGISTRY")
+    minutes=$("$JQ" -r --arg l "$lab" '.[$l].idle.minutes // 60' "$REGISTRY")
+
+    [[ "$action" == none ]] && continue
+    [[ "$("$VIRSH" -c "$URI" domstate "$lab" 2>/dev/null)" == running ]] || continue
+
+    state="$REPO/storage/$lab/state"
+    alive="$state/alive"
+    busy="$state/busy"
+    keep="$state/keepalive"
+
+    [[ -f "$alive" ]] || { log "$lab: no alive marker, skipping"; continue; }
+
+    age=$(( now - $(mtime "$alive") ))
+    if (( age > ALIVE_MAX )); then
+        log "$lab: alive marker is ${age}s stale, skipping"
+        continue
+    fi
+
+    if [[ -f "$keep" ]]; then
+        until=$(cat "$keep" 2>/dev/null || echo 0)
+        [[ "$until" =~ ^[0-9]+$ ]] || until=0
+        if (( until > now )); then
+            log "$lab: held for another $(( until - now ))s"
+            continue
+        fi
+    fi
+
+    [[ -f "$busy" ]] || { log "$lab: no busy marker yet, skipping"; continue; }
+
+    idle=$(( now - $(mtime "$busy") ))
+    (( idle < minutes * 60 )) && continue
+
+    if "$VIRSH" -c "$URI" dumpxml "$lab" 2>/dev/null | grep -q '<hostdev'; then
+        action=shutdown
+    fi
+
+    lockdir=/run/dlab
+    mkdir -p "$lockdir" 2>/dev/null || true
+
+    (
+        exec 9>"$lockdir/$lab.lock"
+        if ! flock -w 5 9; then
+            log "$lab: lock busy, a connection is probably in flight"
+            exit 0
+        fi
+
+        if [[ "$("$VIRSH" -c "$URI" domstate "$lab" 2>/dev/null)" != running ]]; then
+            exit 0
+        fi
+
+        if (( $(mtime "$busy") > now - minutes * 60 )); then
+            log "$lab: became busy under the lock"
+            exit 0
+        fi
+
+        case "$action" in
+            managedsave)
+                log "$lab: idle ${idle}s, saving"
+                "$VIRSH" -c "$URI" managedsave "$lab" >/dev/null 2>&1 \
+                    || { log "$lab: managedsave failed, falling back to shutdown"
+                         "$VIRSH" -c "$URI" shutdown --mode agent,acpi "$lab" >/dev/null 2>&1 || true; }
+                ;;
+            shutdown)
+                log "$lab: idle ${idle}s, shutting down"
+                "$VIRSH" -c "$URI" shutdown --mode agent,acpi "$lab" >/dev/null 2>&1 || true
+                ;;
+        esac
+    )
+done

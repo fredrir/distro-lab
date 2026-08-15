@@ -57,6 +57,46 @@ stop vm:
 reboot vm:
     virsh -c "$TF_VAR_libvirt_uri" reboot {{ vm }}
 
+# Build a nix lab's disk image into images/
+[group('lab')]
+image lab:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    {{ resolve }}
+    kind=$(spec {{ lab }} '.[$l].source.type')
+    [[ "$kind" == nix ]] || { echo "{{ lab }} is a $kind lab, not nix" >&2; exit 1; }
+    untracked=$(git ls-files --others --exclude-standard flake.nix src/labs/nixos)
+    if [[ -n "$untracked" ]]; then
+        echo "untracked files below the flake root are invisible to a git+file flake:" >&2
+        sed 's/^/  /' <<<"$untracked" >&2
+        echo "stage them first: git add -N <files>" >&2
+        exit 1
+    fi
+    out=$(nix build ".#packages.x86_64-linux.image-{{ lab }}" \
+        --out-link "images/.gcroot-{{ lab }}" --print-out-paths)
+    install -m 0644 "$out/{{ lab }}.qcow2" "images/{{ lab }}-base.qcow2"
+    qemu-img resize "images/{{ lab }}-base.qcow2" "$(spec {{ lab }} '.[$l].disk_size_bytes')"
+    readlink -f "$out" > "images/{{ lab }}-base.store-path"
+    qemu-img info "images/{{ lab }}-base.qcow2" | head -4
+
+# Rebuild a nix lab in place over SSH, no tofu
+[group('lab')]
+deploy lab *args:
+    nix develop -c nixos-rebuild switch --flake .#{{ lab }} --target-host {{ lab }} --sudo {{ args }}
+
+# Raise a running lab's balloon and online its cpus
+[group('vm')]
+grow lab mem="" vcpu="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    {{ resolve }}
+    mem="{{ mem }}"; vcpu="{{ vcpu }}"
+    [[ -n "$mem" ]]  || mem="$(spec {{ lab }} '.[$l].memory_mib')M"
+    [[ -n "$vcpu" ]] || vcpu=$(spec {{ lab }} '.[$l].vcpu')
+    virsh -c "$TF_VAR_libvirt_uri" setmem "{{ lab }}" "$mem" --live
+    virsh -c "$TF_VAR_libvirt_uri" setvcpus "{{ lab }}" "$vcpu" --live --guest
+    virsh -c "$TF_VAR_libvirt_uri" dominfo "{{ lab }}" | grep -E 'Used memory|CPU\(s\)'
+
 # Boot a lab and wait for it to answer on SSH
 [group('vm')]
 up lab:

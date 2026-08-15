@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+VIRSH=/usr/bin/virsh
+JQ=/usr/bin/jq
+NC=/usr/bin/nc
+URI=qemu:///system
+
+REPO=$(cd -- "$(dirname -- "$(readlink -f -- "$0")")/../../.." && pwd)
+REGISTRY="$REPO/src/labs/labs.json"
+
+lab="${1:?usage: dlab-ssh-proxy <lab> <port>}"
+port="${2:-22}"
+
+STATE_DIR="$HOME/.local/state/dlab"
+mkdir -p "$STATE_DIR"
+LOG="$STATE_DIR/$lab.log"
+
+say()  { printf 'dlab: %s\n' "$*" >&2; printf '%s %s\n' "$(date -Is)" "$*" >>"$LOG"; }
+die()  { say "$*"; exit 1; }
+
+spec() { "$JQ" -r --arg l "$lab" "$1" "$REGISTRY" 2>/dev/null; }
+
+[[ -f "$REGISTRY" ]] || die "no registry at $REGISTRY"
+"$JQ" -e --arg l "$lab" 'has($l)' "$REGISTRY" >/dev/null 2>&1 || die "$lab is not in $REGISTRY"
+
+octet=$(spec '.[$l].net.host')
+prefix=$(grep -E '^TF_VAR_subnet_prefix=' "$REPO/.env" 2>/dev/null | sed 's/.*="\?\([^"]*\)"\?$/\1/')
+prefix="${prefix:-192.168.123}"
+ip="$prefix.$octet"
+
+domstate() { "$VIRSH" -c "$URI" domstate "$lab" 2>/dev/null || echo undefined; }
+
+wait_for_ssh() {
+    local i
+    for ((i = 0; i < 300; i++)); do
+        "$NC" -z -w1 "$ip" "$port" 2>/dev/null && return 0
+        sleep 1
+    done
+    return 1
+}
+
+keepalive() {
+    local share="$REPO/storage/$lab/state"
+    [[ -d "$share" ]] || return 0
+    date -d '+10 minutes' +%s >"$share/keepalive" 2>/dev/null || true
+}
+
+budget_ok() {
+    [[ "${DLAB_FORCE:-0}" == 1 ]] && return 0
+    local need avail
+    need=$(spec '.[$l].memory_mib // 8192')
+    avail=$(( $(awk '/^MemAvailable:/ {print $2}' /proc/meminfo) / 1024 ))
+    (( avail - 4096 >= need )) && return 0
+    say "refusing to start $lab: needs ${need} MiB, only $(( avail - 4096 )) MiB spendable"
+    say "awake: $("$VIRSH" -c "$URI" list --name | grep '^dlab-' | tr '\n' ' ')"
+    say "stop one with 'just down <lab>', or override with DLAB_FORCE=1"
+    return 1
+}
+
+start_locked() {
+    local state discarded=0
+    state=$(domstate)
+
+    case "$state" in
+        running) return 0 ;;
+        undefined) die "$lab is not defined, run: just apply $lab" ;;
+    esac
+
+    budget_ok || exit 1
+
+    case "$state" in
+        paused)
+            "$VIRSH" -c "$URI" resume "$lab" >/dev/null 2>&1 || die "resume failed"
+            ;;
+        pmsuspended)
+            "$VIRSH" -c "$URI" dompmwakeup "$lab" >/dev/null 2>&1 || die "wakeup failed"
+            ;;
+        "in shutdown")
+            say "waiting for in-progress shutdown"
+            local i
+            for ((i = 0; i < 120; i++)); do
+                [[ "$(domstate)" == "shut off" ]] && break
+                sleep 1
+            done
+            "$VIRSH" -c "$URI" start "$lab" >/dev/null 2>&1 || die "start after shutdown failed"
+            ;;
+        crashed)
+            say "domain was crashed, recreating"
+            "$VIRSH" -c "$URI" destroy "$lab" >/dev/null 2>&1 || true
+            "$VIRSH" -c "$URI" start "$lab" >/dev/null 2>&1 || die "start after crash failed"
+            ;;
+        *)
+            local err
+            if ! err=$("$VIRSH" -c "$URI" start "$lab" 2>&1); then
+                if grep -qi "already active" <<<"$err"; then
+                    :
+                elif "$VIRSH" -c "$URI" dominfo "$lab" 2>/dev/null | grep -qi '^Managed save: *yes'; then
+                    say "restore failed, discarding the saved RAM image: $err"
+                    say "the disk is intact; this is equivalent to a power cut"
+                    "$VIRSH" -c "$URI" managedsave-remove "$lab" >/dev/null 2>&1 || true
+                    date -Is >"$STATE_DIR/$lab.restore-failed"
+                    discarded=1
+                    "$VIRSH" -c "$URI" start "$lab" >/dev/null 2>&1 \
+                        || die "cold start after discarding the save also failed"
+                else
+                    die "start failed: $err"
+                fi
+            fi
+            ;;
+    esac
+
+    keepalive
+    wait_for_ssh || die "$lab started but never answered on $ip:$port"
+    (( discarded )) && say "recovered by cold start; see $STATE_DIR/$lab.restore-failed"
+    return 0
+}
+
+if [[ "$(domstate)" == running ]] && "$NC" -z -w1 "$ip" "$port" 2>/dev/null; then
+    exec "$NC" "$ip" "$port"
+fi
+
+lockdir=/run/dlab
+[[ -d "$lockdir" && -w "$lockdir" ]] || lockdir="${XDG_RUNTIME_DIR:-/tmp}/dlab"
+mkdir -p "$lockdir"
+
+exec 9>"$lockdir/$lab.lock"
+flock 9 || die "could not take the lock for $lab"
+
+if [[ "$(domstate)" == running ]] && "$NC" -z -w1 "$ip" "$port" 2>/dev/null; then
+    exec 9>&-
+    exec "$NC" "$ip" "$port"
+fi
+
+start_locked
+
+exec 9>&-
+exec "$NC" "$ip" "$port"
