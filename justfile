@@ -151,6 +151,48 @@ down lab:
         none)        echo "{{ lab }} has idle.action none, not stopping" >&2 ;;
         *)           virsh -c "$TF_VAR_libvirt_uri" shutdown --mode agent,acpi "{{ lab }}" ;;
     esac
+    rm -f "$HOME/.ssh/cm-"*"@{{ lab }}:"*
+
+# Block the idle stopper for a while
+[group('vm')]
+hold lab duration="2h":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    d="{{ duration }}"
+    case "$d" in
+        *[0-9]m) d="${d%m} minutes" ;;
+        *[0-9]h) d="${d%h} hours" ;;
+        *[0-9]d) d="${d%d} days" ;;
+    esac
+    until=$(date -d "now + $d" +%s)
+    mkdir -p "storage/{{ lab }}/state"
+    echo "$until" > "storage/{{ lab }}/state/keepalive"
+    echo "{{ lab }} held until $(date -d "@$until" '+%H:%M:%S')"
+
+# Release an idle hold early
+[group('vm')]
+release lab:
+    @rm -f "storage/{{ lab }}/state/keepalive" && echo "{{ lab }} released"
+
+# What the idle stopper currently sees
+[group('vm')]
+idle:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    {{ resolve }}
+    now=$(date +%s)
+    printf '%-16s %-9s %-10s %-10s %s\n' LAB STATE ALIVE IDLE HOLD
+    for lab in $(labs); do
+        state=$(virsh -c "$TF_VAR_libvirt_uri" domstate "$lab" 2>/dev/null || echo undefined)
+        s="storage/$lab/state"
+        a="-"; i="-"; h="-"
+        [[ -f "$s/alive" ]] && a="$(( now - $(stat -c %Y "$s/alive") ))s"
+        [[ -f "$s/busy" ]]  && i="$(( (now - $(stat -c %Y "$s/busy")) / 60 ))m"
+        if [[ -f "$s/keepalive" ]]; then
+            u=$(cat "$s/keepalive"); (( u > now )) && h="$(( (u - now) / 60 ))m"
+        fi
+        printf '%-16s %-9s %-10s %-10s %s\n' "$lab" "$state" "$a" "$i" "$h"
+    done
 
 # Dump the libvirt XML of a VM
 [group('vm')]
@@ -247,12 +289,35 @@ doctor:
     fi
 
     echo "ssh"
-    proxy="$HOME/.local/bin/libvirt-ssh-proxy"
-    if [[ -x "$proxy" ]]; then ok "$proxy"; else bad "$proxy missing, symlink src/vm/libvirt-ssh-proxy"; fi
+    proxy="src/vm/bin/dlab-ssh-proxy"
+    if [[ -x "$proxy" ]]; then ok "$proxy"; else bad "$proxy missing or not executable"; fi
     if [[ -e "$HOME/.ssh/config.d/20-distro-lab-host" ]]; then
         ok "~/.ssh/config.d/20-distro-lab-host"
     else
         bad "~/.ssh/config.d/20-distro-lab-host missing, symlink src/vm/ssh/20-distro-lab-host"
+    fi
+    stale=$(command ls "$HOME/.ssh/"cm-*@dlab-* 2>/dev/null | wc -l)
+    if [[ "$stale" -eq 0 ]]; then
+        ok "no lingering ssh control masters"
+    else
+        for s in "$HOME/.ssh/"cm-*@dlab-*; do
+            lab=${s##*@}; lab=${lab%%:*}
+            [[ "$(virsh -c "$TF_VAR_libvirt_uri" domstate "$lab" 2>/dev/null)" == running ]] \
+                || bad "stale control master for stopped $lab, rm $s"
+        done
+    fi
+
+    echo "lifecycle"
+    if systemctl is-enabled dlab-idle-stop.timer >/dev/null 2>&1; then
+        ok "dlab-idle-stop.timer enabled"
+    else
+        bad "dlab-idle-stop.timer not installed, see src/vm/systemd/"
+    fi
+    if [[ -d /run/dlab ]]; then ok "/run/dlab"; else bad "/run/dlab missing, install src/vm/systemd/dlab-tmpfiles.conf"; fi
+    if [[ "$(systemctl is-enabled libvirt-guests 2>/dev/null)" == enabled ]]; then
+        bad "libvirt-guests is enabled and will restore every lab at host boot"
+    else
+        ok "libvirt-guests disabled"
     fi
 
     echo "registry"

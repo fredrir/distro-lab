@@ -1,6 +1,6 @@
 Host dlab-*
     User fredrir
-    ProxyCommand ssh -T -o LogLevel=ERROR archie /storage/distro-lab/src/vm/libvirt-ssh-proxy %h %p
+    ProxyCommand ssh -T -o LogLevel=ERROR archie /storage/distro-lab/src/vm/bin/dlab-ssh-proxy %h %p
     UserKnownHostsFile /dev/null
     StrictHostKeyChecking no
     LogLevel ERROR
@@ -9,4 +9,4 @@ Host dlab-*
     ServerAliveCountMax 6
     ControlMaster auto
     ControlPath ~/.ssh/cm-%r@%h:%p
-    ControlPersist 10m
+    ControlPersist 1m

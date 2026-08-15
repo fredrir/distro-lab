@@ -7,6 +7,7 @@ URI=qemu:///system
 
 REPO=${DLAB_REPO:-/storage/distro-lab}
 REGISTRY="$REPO/src/labs/labs.json"
+DLAB_USER_HOME=${DLAB_USER_HOME:-/home/fredrir}
 
 ALIVE_MAX=180
 
@@ -87,5 +88,7 @@ for lab in $("$JQ" -r 'keys[]' "$REGISTRY"); do
                 "$VIRSH" -c "$URI" shutdown --mode agent,acpi "$lab" >/dev/null 2>&1 || true
                 ;;
         esac
+
+        rm -f "$DLAB_USER_HOME/.ssh/cm-"*"@$lab:"* 2>/dev/null || true
     )
 done
