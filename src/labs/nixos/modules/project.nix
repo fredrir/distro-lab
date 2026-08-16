@@ -44,8 +44,12 @@ in
       after = [
         "network-online.target"
         mountUnit
+        "dlab-work-perms.service"
       ];
-      requires = [ mountUnit ];
+      requires = [
+        mountUnit
+        "dlab-work-perms.service"
+      ];
 
       unitConfig.ConditionPathIsMountPoint = workDir;
 

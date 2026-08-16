@@ -1,7 +1,12 @@
-{ ... }:
+{ pkgs, ... }:
 
+let
+  user = "fredrir";
+  workDir = "/home/${user}/work";
+  mountUnit = "home-${user}-work.mount";
+in
 {
-  fileSystems."/home/fredrir/work" = {
+  fileSystems.${workDir} = {
     device = "/dev/vdb";
     fsType = "ext4";
 
@@ -12,7 +17,19 @@
     ];
   };
 
-  systemd.tmpfiles.rules = [
-    "d /home/fredrir/work 0755 fredrir fredrir -"
-  ];
+  systemd.services.dlab-work-perms = {
+    description = "Hand the work disk to ${user} once it is mounted";
+
+    wantedBy = [ "multi-user.target" ];
+    after = [ mountUnit ];
+    requires = [ mountUnit ];
+
+    unitConfig.ConditionPathIsMountPoint = workDir;
+
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      ExecStart = "${pkgs.coreutils}/bin/chown ${user}:${user} ${workDir}";
+    };
+  };
 }

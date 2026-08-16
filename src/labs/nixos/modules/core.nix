@@ -20,7 +20,7 @@
     luajit
     neovim
     nil
-    nixfmt-rfc-style
+    nixfmt
     pkg-config
     ripgrep
     rsync
