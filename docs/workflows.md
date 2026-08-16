@@ -1,64 +1,38 @@
 # Workflows
 
-## VM workflow
+## Labs
 
-[vm.md](./vm.md)
+[labs.md](./labs.md) — the registry, the flake, the on-demand and idle lifecycle, secrets.
 
-## Bare-metal workflow
+## Bare metal
 
 [bare_metal.md](./bare_metal.md)
 
 ## Persistent distro data
 
-Create persistent storage separately from the distro root:
-
-```bash
-mkdir -p /storage/distro-lab/storage/nixos
-```
-
-The intended lifecycle is:
+Project labs keep work on a dedicated qcow2 mounted at `~/work`, owned by the shared stack so a lab
+rebuild cannot take it. Distro sandboxes have no work disk; anything worth keeping should be copied
+out before a rebuild.
 
 ```text
-create distro root
-        ↓
+create a lab
+      ↓
 experiment
-        ↓
-keep useful data in storage/<distro>
-        ↓
-delete distro root
-        ↓
-persistent data remains
+      ↓
+keep useful data in ~/work, or copy it out
+      ↓
+just rebuild, or just destroy
+      ↓
+work disk and storage/<lab>/ remain
 ```
-
-## Remove an experiment
-
-Ensure the root is not mounted or running.
-
-Then:
-
-```bash
-sudo lvremove vg_distro_lab/nixos-root
-```
-
-Do not remove:
-
-```text
-/storage/distro-lab/storage/nixos/
-```
-
-unless the persistent data should also be discarded.
 
 ## LVM metadata snapshot
 
-Record the current VG layout:
-
 ```bash
-sudo vgcfgbackup \
-  -f src/vg_distro_lab.conf \
-  vg_distro_lab
+sudo vgcfgbackup -f src/vg_distro_lab.conf vg_distro_lab
 ```
 
-This records the LVM layout, not the actual filesystem data.
+Records the LVM layout, not filesystem contents.
 
 ## EFI state snapshot
 

@@ -163,20 +163,33 @@ storage/
 EFI/
 ```
 
-## VM
+## Labs
 
 Configuration lives under:
 
 ```text
-src/distros/<distro>-dev/
-src/vm/
+src/labs/<lab>/       registry-driven tofu stack, plus cloud-init for cloud labs
+src/labs/nixos/       shared modules and per-host import lists
+src/vm/               the VM module, the registry module, lifecycle scripts
+flake.nix             NixOS labs, at the repository root
 ```
 
-VM disks live under:
+Disks live under:
 
 ```text
-images/ # E.g: images/nixos-dev.qcow2
+images/dlab-nsql.qcow2         root, disposable
+images/dlab-nsql-base.qcow2    the built image it was copied from
+images/dlab-nsql-work.qcow2    ~/work, owned by the shared stack, survives a rebuild
 ```
+
+Per-lab host state lives under:
+
+```text
+storage/<lab>/state/   age identity, SSH host key, idle markers
+```
+
+That directory is shared into the guest over virtiofs at `/var/lib/dlab-state`
+and is the only thing host and guest write to in common.
 
 ## State
 
