@@ -384,6 +384,12 @@ resource "libvirt_domain" "vm" {
     ]
   }
 
+  destroy = {
+    shutdown = {
+      timeout = 120
+    }
+  }
+
   lifecycle {
     ignore_changes = [running]
   }

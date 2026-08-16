@@ -79,6 +79,27 @@ image lab:
     readlink -f "$out" > "images/{{ lab }}-base.store-path"
     qemu-img info "images/{{ lab }}-base.qcow2" | head -4
 
+# Generate a lab's age identity and ssh host key on its state share
+[group('lab')]
+lab-keys lab:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    s="storage/{{ lab }}/state"
+    pub="src/labs/nixos/secrets/hosts"
+    mkdir -p "$s" "$pub"
+    if [[ ! -f "$s/agenix.key" ]]; then
+        age-keygen -o "$s/agenix.key" 2>/dev/null
+        chmod 600 "$s/agenix.key"
+        echo "generated age identity for {{ lab }}"
+    fi
+    age-keygen -y "$s/agenix.key" > "$pub/{{ lab }}.pub"
+    if [[ ! -f "$s/ssh_host_ed25519_key" ]]; then
+        ssh-keygen -q -t ed25519 -N "" -C "{{ lab }}" -f "$s/ssh_host_ed25519_key"
+        echo "generated ssh host key for {{ lab }}"
+    fi
+    cp "$s/ssh_host_ed25519_key.pub" "$pub/{{ lab }}.ssh.pub"
+    echo "{{ lab }} age recipient: $(cat "$pub/{{ lab }}.pub")"
+
 # Rebuild a nix lab in place over SSH, no tofu
 [group('lab')]
 deploy lab *args:
@@ -168,6 +189,22 @@ hold lab duration="2h":
     mkdir -p "storage/{{ lab }}/state"
     echo "$until" > "storage/{{ lab }}/state/keepalive"
     echo "{{ lab }} held until $(date -d "@$until" '+%H:%M:%S')"
+
+# Shut a lab down cleanly so its work disk is flushed, then wait
+[group('vm')]
+quiesce lab:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    state=$(virsh -c "$TF_VAR_libvirt_uri" domstate "{{ lab }}" 2>/dev/null || echo undefined)
+    [[ "$state" == running ]] || exit 0
+    echo "quiescing {{ lab }} so buffered writes reach the work disk"
+    virsh -c "$TF_VAR_libvirt_uri" shutdown --mode agent,acpi "{{ lab }}" >/dev/null 2>&1 || true
+    for _ in $(seq 1 120); do
+        [[ "$(virsh -c "$TF_VAR_libvirt_uri" domstate "{{ lab }}" 2>/dev/null)" == "shut off" ]] && exit 0
+        sleep 1
+    done
+    echo "{{ lab }} did not shut down in 120s; destroying it will lose unflushed writes" >&2
+    exit 1
 
 # Release an idle hold early
 [group('vm')]
@@ -461,7 +498,10 @@ destroy stack:
     set -euo pipefail
     {{ resolve }}
     dir=$(resolve_dir {{ stack }})
-    [[ "{{ stack }}" == shared ]] || virsh -c "$TF_VAR_libvirt_uri" managedsave-remove "{{ stack }}" 2>/dev/null || true
+    if [[ "{{ stack }}" != shared ]]; then
+        virsh -c "$TF_VAR_libvirt_uri" managedsave-remove "{{ stack }}" 2>/dev/null || true
+        just quiesce "{{ stack }}"
+    fi
     tofu -chdir="$dir" destroy -auto-approve
 
 # Destroy and recreate a stack from scratch
@@ -475,6 +515,7 @@ rebuild stack:
     if [[ "{{ stack }}" != shared ]]; then
         mkdir -p "storage/{{ stack }}/state"
         virsh -c "$TF_VAR_libvirt_uri" managedsave-remove "{{ stack }}" 2>/dev/null || true
+        just quiesce "{{ stack }}"
     fi
     tofu -chdir="$dir" destroy -auto-approve
     tofu -chdir="$dir" apply -auto-approve

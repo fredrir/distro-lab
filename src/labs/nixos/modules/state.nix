@@ -1,5 +1,8 @@
-{ ... }:
+{ spec, ... }:
 
+let
+  hasSecrets = (spec.secrets or [ ]) != [ ];
+in
 {
   boot.initrd.kernelModules = [ "virtiofs" ];
 
@@ -7,9 +10,15 @@
     device = "dlabstate";
     fsType = "virtiofs";
 
-    options = [
-      "nofail"
-      "x-systemd.device-timeout=10s"
-    ];
+    neededForBoot = hasSecrets;
+
+    options =
+      if hasSecrets then
+        [ "defaults" ]
+      else
+        [
+          "nofail"
+          "x-systemd.device-timeout=10s"
+        ];
   };
 }
