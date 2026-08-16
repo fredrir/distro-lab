@@ -79,6 +79,48 @@ image lab:
     readlink -f "$out" > "images/{{ lab }}-base.store-path"
     qemu-img info "images/{{ lab }}-base.qcow2" | head -4
 
+# Scaffold a lab: registry entry, tofu stack, storage directories
+[group('lab')]
+new-lab name kind="project" distro="nixos" source_type="nix":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    {{ resolve }}
+    lab="{{ name }}"
+    [[ "$lab" == dlab-* ]] || { echo "lab names must start with dlab-" >&2; exit 1; }
+    [[ -e "src/labs/$lab" ]] && { echo "$lab already exists" >&2; exit 1; }
+    jq -e --arg l "$lab" 'has($l)' {{ registry }} >/dev/null 2>&1 \
+        && { echo "$lab is already in {{ registry }}" >&2; exit 1; }
+
+    octet=$(jq '[.[].net.host] | (max // 9) + 1' {{ registry }})
+    tmp=$(mktemp)
+    jq --arg l "$lab" --arg k "{{ kind }}" --arg d "{{ distro }}" \
+       --arg s "{{ source_type }}" --argjson o "$octet" '
+        .[$l] = ({
+            kind: $k, distro: $d, title: $l,
+            source: ({type: $s} + (if $s == "nix" then {host: $l} else {image: ""} end)),
+            net: {host: $o},
+            memory_mib: 8192, current_memory_mib: 4096,
+            vcpu: 16, vcpu_current: 4,
+            disk_size_bytes: 68719476736,
+            idle: {minutes: 60, action: "managedsave"}
+        } + (if $k == "project" then {work_disk_bytes: 53687091200, secrets: ["deploy-key"]} else {} end))
+        | to_entries | sort_by(.key) | from_entries' {{ registry }} > "$tmp"
+    mv "$tmp" {{ registry }}
+
+    mkdir -p "src/labs/$lab/tofu" "storage/$lab/state"
+    sed "s|__LAB__|$lab|g" src/labs/_template/tofu/main.tf > "src/labs/$lab/tofu/main.tf"
+    cp src/labs/_template/tofu/{variables.tf,versions.tf,outputs.tf} "src/labs/$lab/tofu/"
+    cp src/vm/shared/.terraform.lock.hcl "src/labs/$lab/tofu/"
+    tofu -chdir="src/labs/$lab/tofu" init -input=false >/dev/null
+    tofu -chdir=src/vm/shared apply -auto-approve >/dev/null
+
+    echo "created $lab at $TF_VAR_subnet_prefix.$octet"
+    if [[ "{{ source_type }}" == nix ]]; then
+        echo "next: write src/labs/nixos/hosts/$lab.nix, then: just image $lab && just apply $lab"
+    else
+        echo "next: set source.image in {{ registry }} and add src/labs/$lab/config/cloud-init.yaml"
+    fi
+
 # Generate a lab's age identity and ssh host key on its state share
 [group('lab')]
 lab-keys lab:
