@@ -34,6 +34,7 @@ dlab-nixos       NixOS sandbox
 dlab-portfolio   fredrir/portfolio
 dlab-archtex     fredrir/ArchTeX
 dlab-nsql        fredrir/nsql
+dlab-dotfiles    fredrir/dotfiles
 dlab-cuda        CUDA C/C++ on a passed-through GPU
 ```
 

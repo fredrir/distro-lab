@@ -10,7 +10,8 @@ There are two kinds, distinguished by the `kind` field rather than by naming con
 ```text
 dlab-ubuntu  dlab-gentoo  dlab-nixos     distro sandboxes
 dlab-portfolio  dlab-archtex  dlab-nsql  project workspaces
-dlab-cuda                                 GPU workspace
+dlab-dotfiles                            project workspace
+dlab-cuda                                GPU workspace
 ```
 
 `nixos-main` is bare metal, is not reachable over SSH, and is not part of this.

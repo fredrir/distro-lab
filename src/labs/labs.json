@@ -49,6 +49,32 @@
       "action": "shutdown"
     }
   },
+  "dlab-dotfiles": {
+    "kind": "project",
+    "distro": "nixos",
+    "title": "dotfiles",
+    "source": {
+      "type": "nix",
+      "host": "dlab-dotfiles"
+    },
+    "net": {
+      "host": 17
+    },
+    "memory_mib": 8192,
+    "current_memory_mib": 4096,
+    "vcpu": 16,
+    "vcpu_current": 4,
+    "disk_size_bytes": 68719476736,
+    "work_disk_bytes": 53687091200,
+    "idle": {
+      "minutes": 60,
+      "action": "managedsave"
+    },
+    "repo": "git@github.com:fredrir/dotfiles.git",
+    "secrets": [
+      "deploy-key"
+    ]
+  },
   "dlab-gentoo": {
     "kind": "distro",
     "distro": "gentoo",
