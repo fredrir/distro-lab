@@ -52,6 +52,20 @@ tofu/        a five-line stack that looks the lab up in the registry
 NixOS labs add an import list under `src/labs/nixos/hosts/` and draw from the
 shared modules in `src/labs/nixos/modules/`.
 
+### `agents/`
+
+Agent tooling for project labs:
+
+```text
+skillsets.json   skills shared by every project and reusable named sets
+skills/          vendored Agent Skills, including their references and scripts
+```
+
+Each project selects named sets and any one-off skills through its `agent` entry
+in `src/labs/labs.json`. The guest exposes the result through both
+`.agents/skills` and `.claude/skills` without overwriting skills already owned by
+the project.
+
 ### `vm/`
 
 Shared libvirt/OpenTofu infrastructure:
@@ -145,6 +159,7 @@ For NixOS labs:
 just image dlab-nsql     # build the disk image from the flake
 just deploy dlab-nsql    # day-2 rebuild in place, no tofu
 just lab-keys dlab-nsql  # age identity and SSH host key
+just agent-auth          # seed Codex login and a long-lived Claude token
 ```
 
 `just status` puts what OpenTofu believes next to what libvirt actually has,

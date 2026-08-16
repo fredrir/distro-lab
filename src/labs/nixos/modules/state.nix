@@ -2,6 +2,7 @@
 
 let
   hasSecrets = (spec.secrets or [ ]) != [ ];
+  needsState = hasSecrets || spec.kind == "project";
 in
 {
   boot.initrd.kernelModules = [ "virtiofs" ];
@@ -10,10 +11,10 @@ in
     device = "dlabstate";
     fsType = "virtiofs";
 
-    neededForBoot = hasSecrets;
+    neededForBoot = needsState;
 
     options =
-      if hasSecrets then
+      if needsState then
         [ "defaults" ]
       else
         [

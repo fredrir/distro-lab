@@ -1,0 +1,20 @@
+{
+  "shared": [
+    "brainstorm-me",
+    "find-skills",
+    "github-actions-docs",
+    "grill-me",
+    "humanize",
+    "skill-authoring"
+  ],
+  "sets": {
+    "frontend": [
+      "frontend-anti-slop",
+      "vercel-react-best-practices"
+    ],
+    "rust": [
+      "rust-async-patterns",
+      "rust-memory-safety-patterns"
+    ]
+  }
+}

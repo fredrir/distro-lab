@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016 # Single-quoted strings below are jq programs, not shell expressions.
 set -uo pipefail
 
 VIRSH=/usr/bin/virsh
@@ -49,7 +50,10 @@ keepalive() {
 budget_ok() {
     [[ "${DLAB_FORCE:-0}" == 1 ]] && return 0
     local need avail
-    need=$(spec '.[$l].memory_mib // 8192')
+    # Admit against the VM's configured boot allocation, not its hotplug
+    # ceiling.  Most project VMs start well below memory_mib and can grow up
+    # to that value later.
+    need=$(spec '.[$l].current_memory_mib // .[$l].memory_mib // 8192')
     avail=$(( $(awk '/^MemAvailable:/ {print $2}' /proc/meminfo) / 1024 ))
     (( avail - 4096 >= need )) && return 0
     say "refusing to start $lab: needs ${need} MiB, only $(( avail - 4096 )) MiB spendable"

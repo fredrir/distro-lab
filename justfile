@@ -103,7 +103,11 @@ new-lab name kind="project" distro="nixos" source_type="nix":
             vcpu: 16, vcpu_current: 4,
             disk_size_bytes: 68719476736,
             idle: {minutes: 60, action: "managedsave"}
-        } + (if $k == "project" then {work_disk_bytes: 53687091200, secrets: ["deploy-key"]} else {} end))
+        } + (if $k == "project" then {
+            work_disk_bytes: 53687091200,
+            secrets: ["deploy-key"],
+            agent: {skillsets: [], skills: []}
+        } else {} end))
         | to_entries | sort_by(.key) | from_entries' {{ registry }} > "$tmp"
     mv "$tmp" {{ registry }}
 
@@ -141,6 +145,51 @@ lab-keys lab:
     fi
     cp "$s/ssh_host_ed25519_key.pub" "$pub/{{ lab }}.ssh.pub"
     echo "{{ lab }} age recipient: $(cat "$pub/{{ lab }}.pub")"
+
+# Seed Codex credentials and a long-lived Claude token into project VM state
+[group('lab')]
+agent-auth lab="all":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    {{ resolve }}
+
+    codex_home="${CODEX_HOME:-$HOME/.codex}"
+    claude_home="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+    codex_auth="$codex_home/auth.json"
+    claude_token_file="${CLAUDE_CODE_OAUTH_TOKEN_FILE:-$claude_home/oauth-token}"
+    claude_token="${CLAUDE_CODE_OAUTH_TOKEN:-}"
+
+    [[ -f "$codex_auth" ]] || { echo "missing Codex credentials: $codex_auth" >&2; exit 1; }
+    jq -e type "$codex_auth" >/dev/null
+
+    if [[ -z "$claude_token" && -f "$claude_token_file" ]]; then
+        claude_token=$(<"$claude_token_file")
+    fi
+    if [[ -z "$claude_token" ]]; then
+        echo "missing long-lived Claude token" >&2
+        echo 'generate one with: export CLAUDE_CODE_OAUTH_TOKEN="$(claude setup-token)"' >&2
+        echo "then re-run just agent-auth; optionally save it at $claude_token_file" >&2
+        exit 1
+    fi
+    [[ "$claude_token" != *[[:space:]]* ]] \
+        || { echo "Claude token must be one non-empty line without whitespace" >&2; exit 1; }
+
+    if [[ "{{ lab }}" == all ]]; then
+        mapfile -t targets < <(jq -r 'to_entries[] | select(.value.kind == "project") | .key' {{ registry }})
+    else
+        jq -e --arg l "{{ lab }}" '.[$l].kind == "project"' {{ registry }} >/dev/null \
+            || { echo "{{ lab }} is not a project lab" >&2; exit 1; }
+        targets=("{{ lab }}")
+    fi
+
+    umask 077
+    for target in "${targets[@]}"; do
+        state="storage/$target/state/agents"
+        install -d -m 0700 "$state/codex" "$state/claude"
+        install -m 0600 "$codex_auth" "$state/codex/auth.json"
+        printf '%s\n' "$claude_token" | install -m 0600 /dev/stdin "$state/claude/oauth-token"
+        echo "seeded Codex credentials and Claude token for $target"
+    done
 
 # Rebuild a nix lab in place over SSH, no tofu
 [group('lab')]

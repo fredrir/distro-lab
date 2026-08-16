@@ -24,7 +24,16 @@
     "repo": "git@github.com:fredrir/ArchTeX.git",
     "secrets": [
       "deploy-key"
-    ]
+    ],
+    "agent": {
+      "skillsets": [
+        "frontend",
+        "rust"
+      ],
+      "skills": [
+        "tauri"
+      ]
+    }
   },
   "dlab-cuda": {
     "kind": "project",
@@ -47,6 +56,13 @@
     "idle": {
       "minutes": 240,
       "action": "shutdown"
+    },
+    "agent": {
+      "skillsets": [],
+      "skills": [
+        "hardware-optimization",
+        "rust-memory-safety-patterns"
+      ]
     }
   },
   "dlab-dotfiles": {
@@ -60,10 +76,10 @@
     "net": {
       "host": 17
     },
-    "memory_mib": 8192,
-    "current_memory_mib": 4096,
+    "memory_mib": 16384,
+    "current_memory_mib": 8192,
     "vcpu": 16,
-    "vcpu_current": 4,
+    "vcpu_current": 8,
     "disk_size_bytes": 68719476736,
     "work_disk_bytes": 53687091200,
     "idle": {
@@ -73,7 +89,11 @@
     "repo": "git@github.com:fredrir/dotfiles.git",
     "secrets": [
       "deploy-key"
-    ]
+    ],
+    "agent": {
+      "skillsets": [],
+      "skills": []
+    }
   },
   "dlab-gentoo": {
     "kind": "distro",
@@ -142,7 +162,13 @@
     "repo": "git@github.com:fredrir/nsql.git",
     "secrets": [
       "deploy-key"
-    ]
+    ],
+    "agent": {
+      "skillsets": [
+        "rust"
+      ],
+      "skills": []
+    }
   },
   "dlab-portfolio": {
     "kind": "project",
@@ -168,7 +194,16 @@
     "repo": "git@github.com:fredrir/portfolio.git",
     "secrets": [
       "deploy-key"
-    ]
+    ],
+    "agent": {
+      "skillsets": [
+        "frontend",
+        "rust"
+      ],
+      "skills": [
+        "durable-objects"
+      ]
+    }
   },
   "dlab-ubuntu": {
     "kind": "distro",

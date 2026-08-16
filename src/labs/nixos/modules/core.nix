@@ -22,10 +22,12 @@
     pkg-config
     ripgrep
     rsync
+    starship
     tmux
     tree
     unzip
     wget
+    zsh
   ];
 
   programs.direnv = {

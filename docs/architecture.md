@@ -185,7 +185,7 @@ images/dlab-nsql-work.qcow2    ~/work, owned by the shared stack, survives a reb
 Per-lab host state lives under:
 
 ```text
-storage/<lab>/state/   age identity, SSH host key, idle markers
+storage/<lab>/state/   age identity, SSH host key, agent credentials, idle markers
 ```
 
 That directory is shared into the guest over virtiofs at `/var/lib/dlab-state`

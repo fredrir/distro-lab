@@ -34,6 +34,11 @@ variable "labs" {
 
     repo    = optional(string)
     secrets = optional(list(string), [])
+
+    agent = optional(object({
+      skillsets = optional(list(string), [])
+      skills    = optional(list(string), [])
+    }), {})
   }))
 
   validation {

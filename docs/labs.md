@@ -35,6 +35,7 @@ libvirt refuses to serialise a domain with an assigned PCI device.
 ```bash
 just new-lab dlab-foo project nixos nix
 just lab-keys dlab-foo          # only if it needs secrets
+just agent-auth dlab-foo        # seed Codex login and a long-lived Claude token
 just image dlab-foo             # only for nix labs
 just apply shared               # installs its DHCP reservation
 just apply dlab-foo
@@ -176,13 +177,62 @@ Each project lab has two extra devices:
 
 - `~/work` — a qcow2 owned by the **shared** stack, so `just rebuild` cannot take it with the lab.
 - `/var/lib/dlab-state` — a small virtiofs share of `storage/<lab>/state/`, carrying the age
-  identity, the SSH host key and the idle markers. It is the only thing the host and guest share
-  directly.
+  identity, the SSH host key, agent login state and idle markers. It is the only thing the host and
+  guest share directly.
 
 Destroying a running domain force-kills it and ext4 loses whatever is still in page cache — that
 silently zero-filled a checkout's refs once. The domain now requests a guest shutdown before
 undefine, and the justfile quiesces a lab first. If a checkout is ever unusable the clone unit moves
 it aside as `<name>.broken.<timestamp>` and reclones; it never deletes anything.
+
+## Agent CLIs and skills
+
+Every NixOS lab with `kind = "project"` includes `codex`, `claude`, and
+`dlab-agent-status`. The CLI packages come from the flake's pinned nixpkgs, so an image rebuild or
+`just deploy <lab>` updates them together with the rest of the guest.
+
+Skills have three layers:
+
+1. `src/agents/skillsets.json` has `shared`, which every project receives.
+2. The same file has reusable named sets. A project selects them with `agent.skillsets` in
+   `src/labs/labs.json`; this is how Rust and frontend skills are shared by several, but not all,
+   projects.
+3. `agent.skills` in the registry adds skills to only that project.
+
+The full skill directories are vendored below `src/agents/skills/`. On boot, the guest links the
+resolved set into `<repo>/.agents/skills`. Claude Code currently discovers project skills below
+`.claude/skills`, so dlab exposes the same directories there as well. Existing project-owned skills
+win on a name collision; dlab only creates, updates, or removes links that point to its own Nix store
+paths. Generated links are added to the checkout's local `.git/info/exclude` and do not dirty the
+repository.
+
+For a project without a configured repository, such as `dlab-cuda`, `~/work` is the project root.
+For cloned projects, the root is `~/work/<repo>`.
+
+Codex and Claude keep credentials in persistent, per-lab directories below
+`storage/<lab>/state/agents/`. Codex can reuse the host login file. Claude's ordinary login uses a
+rotating refresh token, so cloning `~/.claude/.credentials.json` across VMs is not durable. Generate
+the supported one-year, inference-only token once and seed every project with it:
+
+```bash
+export CLAUDE_CODE_OAUTH_TOKEN="$(claude setup-token)"
+just agent-auth                 # all project labs
+just agent-auth dlab-archtex   # one project lab
+unset CLAUDE_CODE_OAUTH_TOKEN
+```
+
+Instead of keeping the token in the shell, save the single token line with mode `0600` at
+`~/.claude/oauth-token`; `just agent-auth` reads that path by default. The recipe copies
+`~/.codex/auth.json` and the Claude token with mode `0600`. In the guest, `~/.codex` and `~/.claude`
+point at the corresponding state directories, and the packaged `claude` launcher reads the token
+without putting it in the image. Run `dlab-agent-status` inside a guest to show both CLI versions,
+both login states, and the discovered project skills.
+
+These files are bearer credentials. They stay below the gitignored `storage/` tree, but backups of
+that tree must be protected like the accounts themselves. Re-run `just agent-auth` after signing in
+again on the host or rotating credentials. Codex also supports API-key and enterprise access-token
+login. See the official [Codex authentication](https://learn.chatgpt.com/docs/auth) and
+[Claude Code authentication](https://code.claude.com/docs/en/authentication) documentation.
 
 ## Secrets
 

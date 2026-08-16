@@ -11,7 +11,12 @@
   };
 
   outputs =
-    { self, nixpkgs, agenix, ... }@inputs:
+    {
+      self,
+      nixpkgs,
+      agenix,
+      ...
+    }@inputs:
     let
       system = "x86_64-linux";
       lib = nixpkgs.lib;
@@ -42,6 +47,7 @@
             ./src/labs/nixos/modules/state.nix
             ./src/labs/nixos/modules/idle.nix
             ./src/labs/nixos/modules/secrets.nix
+            ./src/labs/nixos/modules/agents.nix
             (./src/labs/nixos/hosts + "/${name}.nix")
           ];
         };
