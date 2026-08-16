@@ -16,15 +16,12 @@
     htop
     jq
     lsof
-    lua-language-server
-    luajit
     neovim
     nil
     nixfmt
     pkg-config
     ripgrep
     rsync
-    stylua
     tmux
     tree
     unzip
