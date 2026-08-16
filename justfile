@@ -156,8 +156,25 @@ grow lab mem="" vcpu="":
     mem="{{ mem }}"; vcpu="{{ vcpu }}"
     [[ -n "$mem" ]]  || mem="$(spec {{ lab }} '.[$l].memory_mib')M"
     [[ -n "$vcpu" ]] || vcpu=$(spec {{ lab }} '.[$l].vcpu')
+
+    want=$(numfmt --from=iec "${mem%[Mm]}$([[ "$mem" =~ [Mm]$ ]] && echo M)" 2>/dev/null || echo 0)
+    want=$(( want / 1048576 ))
+    (( want == 0 )) && want=${mem%[MmGg]}
+    now=$(( $(virsh -c "$TF_VAR_libvirt_uri" dommemstat "{{ lab }}" | awk '/^actual/{print $2}') / 1024 ))
+    delta=$(( want - now ))
+    if (( delta > 0 )) && [[ "${DLAB_FORCE:-0}" != 1 ]]; then
+        avail=$(( $(awk '/^MemAvailable:/ {print $2}' /proc/meminfo) / 1024 ))
+        if (( avail - 4096 < delta )); then
+            echo "refusing to grow {{ lab }} by ${delta} MiB: only $(( avail - 4096 )) MiB spendable" >&2
+            echo "stop another lab first, or override with DLAB_FORCE=1" >&2
+            exit 1
+        fi
+    fi
+
     virsh -c "$TF_VAR_libvirt_uri" setmem "{{ lab }}" "$mem" --live
-    virsh -c "$TF_VAR_libvirt_uri" setvcpus "{{ lab }}" "$vcpu" --live --guest
+    virsh -c "$TF_VAR_libvirt_uri" setvcpus "{{ lab }}" "$vcpu" --live
+    virsh -c "$TF_VAR_libvirt_uri" setvcpus "{{ lab }}" "$vcpu" --guest
+    sleep 5
     virsh -c "$TF_VAR_libvirt_uri" dominfo "{{ lab }}" | grep -E 'Used memory|CPU\(s\)'
 
 # Boot a lab and wait for it to answer on SSH
@@ -169,12 +186,12 @@ up lab:
     mkdir -p "storage/{{ lab }}/state"
     state=$(virsh -c "$TF_VAR_libvirt_uri" domstate "{{ lab }}" 2>/dev/null || echo undefined)
     if [[ "$state" != running && "${DLAB_FORCE:-0}" != 1 ]]; then
-        need=$(spec {{ lab }} '.[$l].memory_mib // 8192')
+        need=$(spec {{ lab }} '.[$l].current_memory_mib // 4096')
         avail=$(( $(awk '/^MemAvailable:/ {print $2}' /proc/meminfo) / 1024 ))
         reserve=4096
         if (( avail - reserve < need )); then
             echo "refusing to start {{ lab }}: needs ${need} MiB, only $(( avail - reserve )) MiB spendable (${avail} MiB available, ${reserve} MiB reserved for the host)" >&2
-            echo "virtiofs inhibits ram discard, so a lab's host RSS is its full memory_mib regardless of the balloon." >&2
+            echo "that is the lab's boot balloon target; growing it later costs more." >&2
             echo "awake now:" >&2
             for d in $(virsh -c "$TF_VAR_libvirt_uri" list --name); do
                 [[ "$d" == dlab-* ]] && echo "  $d    stop with: just down $d" >&2

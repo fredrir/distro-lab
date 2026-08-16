@@ -335,7 +335,7 @@ resource "libvirt_domain" "vm" {
     mem_balloon = {
       model               = "virtio"
       free_page_reporting = "on"
-      auto_deflate        = "on"
+      auto_deflate        = "off"
 
       stats = {
         period = 10

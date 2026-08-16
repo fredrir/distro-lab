@@ -137,17 +137,29 @@ seconds, measured.
 `just down` and the idle stopper delete the socket when they stop a lab, and `ControlPersist` is one
 minute to bound the window. If you ever stop a lab by other means, `rm ~/.ssh/cm-*@<lab>:*`.
 
-## Memory is committed, not borrowed
+## Memory is dynamic, and the balloon is the cap
 
-**A lab's `memory_mib` is what it costs the host, regardless of the balloon.** virtiofs is a
-vhost-user device, so QEMU keeps the whole guest mapped for virtiofsd and inhibits RAM discard. A lab
-configured with 12 GiB and ballooned to 6 was measured holding 11.6 GiB of host RSS, essentially all
-`RssShmem`. Resident size is a high-water mark that climbs as the guest touches pages, including page
-cache, and never falls.
+The virtio balloon works in both directions and genuinely returns memory to the host. Measured on a
+lab holding 4228 MiB of host RSS, `virsh setmem --live 2G` brought it down to 736 MiB.
 
-So `current_memory_mib` limits what the guest will use but protects nothing on the host, and
-`free_page_reporting` is inert. The concurrency guard in `just up` and host zram are what actually
-keep the machine alive; the same property also means KSM can never merge these guests.
+What matters is `autodeflate`. With it **on**, a guest under memory pressure deflates its own balloon
+and climbs back up to `<memory>` unbidden — a lab configured with 12 GiB and a 6 GiB balloon target
+was measured at 11.6 GiB of host RSS, with `virsh dommemstat` showing the target had moved by itself
+from 6 GiB to 7.9 GiB. With it **off**, the balloon is a hard ceiling: a guest told to fill 5 GiB
+against a 3 GiB target left host RSS at 3123 MiB.
+
+These labs run `autodeflate='off'`, so `current_memory_mib` is a real cap on what the lab can cost
+the host, and `just grow` raises it when you want more.
+
+The tradeoff is deliberate. Capping pushes memory pressure inside the guest rather than onto the
+host, so a lab that over-allocates becomes slow or unreachable while the host stays healthy — which
+is the right way round, since a host OOM takes your desktop with it. NixOS labs run guest zram to
+soften that; the cloud images do not.
+
+`memory_mib` remains the number the admission guard uses, because it is the worst case a lab can
+reach if you grow it. Note the guard checks `MemAvailable` at start time while RSS grows lazily
+afterwards, so three labs can each pass and then contend — keep an eye on `just vms` if you run
+several at once.
 
 `virsh setmem --live` works in both directions inside the ceiling. CPUs need
 `virsh setvcpus --live --guest` — plain `--live` leaves them present but offline, because all vCPUs

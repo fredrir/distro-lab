@@ -10,7 +10,7 @@
     "net": {
       "host": 14
     },
-    "memory_mib": 16384,
+    "memory_mib": 24576,
     "current_memory_mib": 8192,
     "vcpu": 12,
     "vcpu_current": 6,
@@ -60,7 +60,7 @@
     "net": {
       "host": 11
     },
-    "memory_mib": 8192,
+    "memory_mib": 24576,
     "current_memory_mib": 6144,
     "vcpu": 12,
     "vcpu_current": 4,
@@ -82,7 +82,7 @@
     "net": {
       "host": 12
     },
-    "memory_mib": 8192,
+    "memory_mib": 24576,
     "current_memory_mib": 4096,
     "vcpu": 16,
     "vcpu_current": 4,
@@ -103,7 +103,7 @@
     "net": {
       "host": 15
     },
-    "memory_mib": 8192,
+    "memory_mib": 24576,
     "current_memory_mib": 4096,
     "vcpu": 16,
     "vcpu_current": 4,
@@ -129,7 +129,7 @@
     "net": {
       "host": 13
     },
-    "memory_mib": 8192,
+    "memory_mib": 24576,
     "current_memory_mib": 4096,
     "vcpu": 16,
     "vcpu_current": 4,
@@ -155,7 +155,7 @@
     "net": {
       "host": 10
     },
-    "memory_mib": 8192,
+    "memory_mib": 24576,
     "current_memory_mib": 4096,
     "vcpu": 16,
     "vcpu_current": 4,
