@@ -166,6 +166,19 @@ resource "libvirt_volume" "base" {
 }
 
 
+# The provider does not mark backing_store as forcing replacement: it plans a
+# changed base as an in-place update and then refuses it at apply time with
+# "Storage volumes cannot be updated". A new base would wedge the stack. Carry
+# the base path in something whose replacement can be triggered, and hang the
+# root off it, so `just image` followed by `just apply` recreates the overlay.
+#
+# Only nix labs need it. A cloud lab's base keeps one name however often it is
+# re-uploaded, so its backing path never changes.
+resource "terraform_data" "base" {
+  triggers_replace = local.is_nix ? local.image_path : null
+}
+
+
 resource "libvirt_volume" "root" {
   name     = "${var.name}.qcow2"
   pool     = var.pool
@@ -206,6 +219,10 @@ resource "libvirt_volume" "root" {
       }
     ])
   )
+
+  lifecycle {
+    replace_triggered_by = [terraform_data.base]
+  }
 }
 
 

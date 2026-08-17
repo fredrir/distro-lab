@@ -80,6 +80,15 @@
 
   documentation.nixos.enable = false;
 
+  # The NixOS manual is not the expensive half. `documentation.doc` is what puts
+  # "doc" in environment.extraOutputsToInstall, and that pulls every package's
+  # doc output into the system closure — rustc-1.95.0-doc alone is 634 MiB, in
+  # each of the four labs that carry rust. Nothing in a headless lab can read
+  # rendered HTML. Measured at 731 MiB off dlab-nsql, ~3.0 GiB across the six.
+  # man survives, and is 13 MiB.
+  documentation.doc.enable = false;
+  documentation.info.enable = false;
+
   nix.settings = {
     experimental-features = [
       "nix-command"
