@@ -25,9 +25,14 @@ spec() { "$JQ" -r --arg l "$lab" "$1" "$REGISTRY" 2>/dev/null; }
 [[ -f "$REGISTRY" ]] || die "no registry at $REGISTRY"
 "$JQ" -e --arg l "$lab" 'has($l)' "$REGISTRY" >/dev/null 2>&1 || die "$lab is not in $REGISTRY"
 
+env_value() { grep -E "^$1=" "$REPO/.env" 2>/dev/null | sed 's/.*="\?\([^"]*\)"\?$/\1/'; }
+
 octet=$(spec '.[$l].net.host')
-prefix=$(grep -E '^TF_VAR_subnet_prefix=' "$REPO/.env" 2>/dev/null | sed 's/.*="\?\([^"]*\)"\?$/\1/')
+prefix=$(env_value TF_VAR_subnet_prefix)
 prefix="${prefix:-192.168.123}"
+
+# The state shares sit with the images, not with the checkout.
+STORE=${DLAB_STORAGE:-$(env_value TF_VAR_storage_path)}
 ip="$prefix.$octet"
 
 domstate() { "$VIRSH" -c "$URI" domstate "$lab" 2>/dev/null || echo undefined; }
@@ -42,7 +47,7 @@ wait_for_ssh() {
 }
 
 keepalive() {
-    local share="$REPO/storage/$lab/state"
+    local share="$STORE/storage/$lab/state"
     [[ -d "$share" ]] || return 0
     date -d '+10 minutes' +%s >"$share/keepalive" 2>/dev/null || true
 }

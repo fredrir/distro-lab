@@ -115,7 +115,6 @@ Within the lab:
 ├── ISOs/
 ├── EFI/
 ├── roots/
-├── src/
 └── storage/
 ```
 
@@ -137,13 +136,16 @@ Deleting `nixos-root` therefore does not delete the persistent NixOS data.
 
 ## Repository
 
-The Git repository root is:
+The checkout and the artifacts it manages are two separate trees. `TF_VAR_storage_path`
+in `.env` names the artifact tree, and everything that writes an image or a state share
+resolves it from there, so the checkout itself can sit anywhere — on a fast disk, for
+instance, while the artifacts stay on the big one:
 
 ```text
-/storage/distro-lab
+TF_VAR_storage_path="/storage/distro-lab"
 ```
 
-`src/` contains configuration and infrastructure code:
+`src/` in the checkout contains configuration and infrastructure code:
 
 ```text
 src/
@@ -153,15 +155,18 @@ src/
 └── vg_distro_lab-before-nixos.conf
 ```
 
-Runtime or large binary data lives outside `src/`, including:
+Runtime and large binary data live in the artifact tree, never in the checkout:
 
 ```text
-images/
-ISOs/
-roots/
-storage/
-EFI/
+/storage/distro-lab/images/
+/storage/distro-lab/ISOs/
+/storage/distro-lab/roots/
+/storage/distro-lab/storage/
+/storage/distro-lab/EFI/
 ```
+
+OpenTofu state is per-checkout, in `src/labs/<lab>/tofu/`, so exactly one checkout may
+drive a given set of labs.
 
 ## Labs
 
@@ -177,15 +182,15 @@ flake.nix             NixOS labs, at the repository root
 Disks live under:
 
 ```text
-images/dlab-nsql.qcow2         root, disposable
-images/dlab-nsql-base.qcow2    the built image it was copied from
-images/dlab-nsql-work.qcow2    ~/work, owned by the shared stack, survives a rebuild
+<storage_path>/images/dlab-nsql.qcow2         root, disposable
+<storage_path>/images/dlab-nsql-base.qcow2    the built image it was copied from
+<storage_path>/images/dlab-nsql-work.qcow2    ~/work, owned by the shared stack, survives a rebuild
 ```
 
 Per-lab host state lives under:
 
 ```text
-storage/<lab>/state/   age identity, SSH host key, agent credentials, idle markers
+<storage_path>/storage/<lab>/state/   age identity, SSH host key, agent credentials, idle markers
 ```
 
 That directory is shared into the guest over virtiofs at `/var/lib/dlab-state`

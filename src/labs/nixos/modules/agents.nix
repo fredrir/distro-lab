@@ -71,6 +71,7 @@ let
     runtimeInputs = [
       claudeCli
       pkgs.codex
+      pkgs.opencode
       pkgs.coreutils
       pkgs.findutils
     ];
@@ -81,6 +82,9 @@ let
       echo
       echo "Claude: $(claude --version)"
       claude auth status --text || true
+      echo
+      echo "opencode: $(opencode --version)"
+      opencode auth list || true
       echo
       echo "Project skills:"
       find -L ${lib.escapeShellArg projectDir}/.agents/skills -mindepth 2 -maxdepth 2 \
@@ -108,13 +112,18 @@ in
     environment.systemPackages = [
       claudeCli
       pkgs.codex
+      pkgs.opencode
       agentStatus
     ];
 
     nixpkgs.config.allowUnfreePredicate = package: lib.getName package == "claude-code";
 
+    # The CLI version is pinned by the flake and its store path is read-only, so
+    # never let opencode try to replace itself.
+    environment.variables.OPENCODE_DISABLE_AUTOUPDATE = "1";
+
     systemd.services.dlab-agent-home = {
-      description = "Attach persistent Codex and Claude configuration";
+      description = "Attach persistent Codex, Claude and opencode configuration";
       wantedBy = [ "multi-user.target" ];
       after = [ stateMountUnit ];
       requires = [ stateMountUnit ];
@@ -132,7 +141,18 @@ in
         state=${stateDir}/agents
         home=${homeDir}
 
-        install -d -m 0700 -o ${user} -g ${group} "$state" "$state/codex" "$state/claude"
+        install -d -m 0700 -o ${user} -g ${group} \
+          "$state" "$state/codex" "$state/claude" \
+          "$state/opencode" "$state/opencode/data" "$state/opencode/config"
+
+        # opencode splits its credentials and session database from its
+        # configuration along XDG lines, so both parents must exist before the
+        # links below can be planted inside them.  Name every component: install
+        # applies the owner only to the directories it is given, and leaves any
+        # parent it had to create along the way owned by root, which then blocks
+        # opencode from creating its own ~/.local/state.
+        install -d -m 0755 -o ${user} -g ${group} \
+          "$home/.config" "$home/.local" "$home/.local/share"
 
         link_config_dir() {
           source=$1
@@ -156,6 +176,8 @@ in
 
         link_config_dir "$state/codex" "$home/.codex"
         link_config_dir "$state/claude" "$home/.claude"
+        link_config_dir "$state/opencode/data" "$home/.local/share/opencode"
+        link_config_dir "$state/opencode/config" "$home/.config/opencode"
       '';
     };
 

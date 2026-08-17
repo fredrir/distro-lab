@@ -5,5 +5,4 @@ Wants=libvirtd.service
 
 [Service]
 Type=oneshot
-ExecStart=/storage/distro-lab/src/vm/bin/dlab-idle-stop
-Environment=DLAB_REPO=/storage/distro-lab
+ExecStart=/home/fredrir/projects/distro-lab/src/vm/bin/dlab-idle-stop

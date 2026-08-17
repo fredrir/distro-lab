@@ -16,7 +16,7 @@ module "registry" {
   source = "../../../vm/modules/lab-registry"
 
   labs            = jsondecode(file("${path.module}/../../labs.json"))
-  distro_lab_path = var.distro_lab_path
+  storage_path = var.storage_path
   subnet_prefix   = var.subnet_prefix
 }
 

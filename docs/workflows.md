@@ -4,9 +4,10 @@
 
 [labs.md](./labs.md) — the registry, the flake, the on-demand and idle lifecycle, secrets.
 
-After creating a project lab, seed its local agent credentials once. Claude requires the long-lived
-token produced by `claude setup-token`, provided as `CLAUDE_CODE_OAUTH_TOKEN` or saved at
-`~/.claude/oauth-token`:
+After creating a project lab, seed its local agent credentials once. Codex and opencode are copied
+from the host login files, so be signed in to both there (`codex login`, `opencode auth login`).
+Claude requires the long-lived token produced by `claude setup-token`, provided as
+`CLAUDE_CODE_OAUTH_TOKEN` or saved at `~/.claude/oauth-token`:
 
 ```bash
 export CLAUDE_CODE_OAUTH_TOKEN="$(claude setup-token)"

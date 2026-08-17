@@ -2,7 +2,7 @@ variable "libvirt_uri" {
   type = string
 }
 
-variable "distro_lab_path" {
+variable "storage_path" {
   type = string
 }
 

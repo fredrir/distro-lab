@@ -22,11 +22,11 @@ locals {
 
         image_url = (
           lab.source.type == "nix"
-          ? "file://${var.distro_lab_path}/images/${name}-base.qcow2"
+          ? "file://${var.storage_path}/images/${name}-base.qcow2"
           : (
             can(regex("^[a-z0-9+.-]+://", lab.source.image))
             ? lab.source.image
-            : "file://${var.distro_lab_path}/${lab.source.image}"
+            : "file://${var.storage_path}/${lab.source.image}"
           )
         )
       }
@@ -43,7 +43,7 @@ locals {
       work_disk_bytes  = lab.work_disk_bytes
       work_volume_name = lab.work_disk_bytes > 0 ? "${name}-work.qcow2" : null
 
-      state_share_path = "${var.distro_lab_path}/storage/${name}/state"
+      state_share_path = "${var.storage_path}/storage/${name}/state"
       state_share_tag  = "dlabstate"
 
       gpu_pci = lab.gpu_pci

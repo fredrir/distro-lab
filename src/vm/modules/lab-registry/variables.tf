@@ -107,7 +107,7 @@ variable "labs" {
   }
 }
 
-variable "distro_lab_path" {
+variable "storage_path" {
   type = string
 }
 

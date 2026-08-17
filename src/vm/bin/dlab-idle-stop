@@ -5,15 +5,20 @@ VIRSH=/usr/bin/virsh
 JQ=/usr/bin/jq
 URI=qemu:///system
 
-REPO=${DLAB_REPO:-/storage/distro-lab}
+REPO=${DLAB_REPO:-$(cd -- "$(dirname -- "$(readlink -f -- "$0")")/../../.." && pwd)}
 REGISTRY="$REPO/src/labs/labs.json"
 DLAB_USER_HOME=${DLAB_USER_HOME:-/home/fredrir}
+
+# The state shares sit with the images, not with the checkout.
+env_value() { grep -E "^$1=" "$REPO/.env" 2>/dev/null | sed 's/.*="\?\([^"]*\)"\?$/\1/'; }
+STORE=${DLAB_STORAGE:-$(env_value TF_VAR_storage_path)}
 
 ALIVE_MAX=180
 
 log() { printf 'dlab-idle-stop: %s\n' "$*"; }
 
 [[ -f "$REGISTRY" ]] || { log "no registry at $REGISTRY"; exit 1; }
+[[ -n "$STORE" ]] || { log "no TF_VAR_storage_path in $REPO/.env"; exit 1; }
 
 now=$(date +%s)
 
@@ -26,7 +31,7 @@ for lab in $("$JQ" -r 'keys[]' "$REGISTRY"); do
     [[ "$action" == none ]] && continue
     [[ "$("$VIRSH" -c "$URI" domstate "$lab" 2>/dev/null)" == running ]] || continue
 
-    state="$REPO/storage/$lab/state"
+    state="$STORE/storage/$lab/state"
     alive="$state/alive"
     busy="$state/busy"
     keep="$state/keepalive"

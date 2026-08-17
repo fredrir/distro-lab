@@ -7,7 +7,7 @@ module "registry" {
   source = "../modules/lab-registry"
 
   labs            = jsondecode(file("${path.module}/../../labs/labs.json"))
-  distro_lab_path = var.distro_lab_path
+  storage_path = var.storage_path
   subnet_prefix   = var.subnet_prefix
 }
 
@@ -17,7 +17,7 @@ resource "libvirt_pool" "images" {
   type = "dir"
 
   target = {
-    path = "${var.distro_lab_path}/images"
+    path = "${var.storage_path}/images"
   }
 
   create = {

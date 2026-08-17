@@ -1,6 +1,6 @@
 Host dlab-*
     User fredrir
-    ProxyCommand /storage/distro-lab/src/vm/bin/dlab-ssh-proxy %h %p
+    ProxyCommand /home/fredrir/projects/distro-lab/src/vm/bin/dlab-ssh-proxy %h %p
     UserKnownHostsFile /dev/null
     StrictHostKeyChecking no
     LogLevel ERROR

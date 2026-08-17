@@ -64,7 +64,8 @@ skills/          vendored Agent Skills, including their references and scripts
 Each project selects named sets and any one-off skills through its `agent` entry
 in `src/labs/labs.json`. The guest exposes the result through both
 `.agents/skills` and `.claude/skills` without overwriting skills already owned by
-the project.
+the project. opencode auto-loads both of those directories, so it needs no copy
+of its own.
 
 ### `vm/`
 
@@ -159,11 +160,21 @@ For NixOS labs:
 just image dlab-nsql     # build the disk image from the flake
 just deploy dlab-nsql    # day-2 rebuild in place, no tofu
 just lab-keys dlab-nsql  # age identity and SSH host key
-just agent-auth          # seed Codex login and a long-lived Claude token
+just agent-auth          # seed Codex and opencode logins, and a long-lived Claude token
 ```
 
 `just status` puts what OpenTofu believes next to what libvirt actually has,
 which is how a VM created or deleted outside OpenTofu shows up.
+
+The checkout and the artifacts are separate trees. `TF_VAR_storage_path` in
+`.env` names the one holding `images/`, `ISOs/` and the per-lab state shares, and
+every recipe, the SSH proxy and the idle stopper resolve it from there rather
+than from their own location. So the checkout can live on a fast disk while the
+95 GB of images stays on the big one, and no recipe can quietly write artifacts
+next to the source.
+
+OpenTofu state, though, is per-checkout under `src/labs/<lab>/tofu/`, so exactly
+one checkout drives a given set of labs.
 
 `TF_PLUGIN_CACHE_DIR` in `.env` makes every stack share one copy of the libvirt
 provider instead of downloading 26 MB per stack. `just init` creates it.

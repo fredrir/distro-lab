@@ -35,7 +35,7 @@ libvirt refuses to serialise a domain with an assigned PCI device.
 ```bash
 just new-lab dlab-foo project nixos nix
 just lab-keys dlab-foo          # only if it needs secrets
-just agent-auth dlab-foo        # seed Codex login and a long-lived Claude token
+just agent-auth dlab-foo        # seed Codex and opencode logins, and a long-lived Claude token
 just image dlab-foo             # only for nix labs
 just apply shared               # installs its DHCP reservation
 just apply dlab-foo
@@ -187,9 +187,11 @@ it aside as `<name>.broken.<timestamp>` and reclones; it never deletes anything.
 
 ## Agent CLIs and skills
 
-Every NixOS lab with `kind = "project"` includes `codex`, `claude`, and
+Every NixOS lab with `kind = "project"` includes `codex`, `claude`, `opencode`, and
 `dlab-agent-status`. The CLI packages come from the flake's pinned nixpkgs, so an image rebuild or
-`just deploy <lab>` updates them together with the rest of the guest.
+`just deploy <lab>` updates them together with the rest of the guest. Because the pin is what decides
+the version, guests set `OPENCODE_DISABLE_AUTOUPDATE=1`; `opencode upgrade` cannot write to the
+read-only store path anyway.
 
 Skills have three layers:
 
@@ -206,13 +208,18 @@ win on a name collision; dlab only creates, updates, or removes links that point
 paths. Generated links are added to the checkout's local `.git/info/exclude` and do not dirty the
 repository.
 
+opencode needs no third copy: it walks up from the working directory and auto-loads
+`.agents/skills/<name>/SKILL.md` and `.claude/skills/<name>/SKILL.md`, which is exactly what the
+guest already provisions. Its own conventions, `.opencode/skill(s)/` in a project and
+`~/.config/opencode/skill(s)/`, stay free for skills dlab does not manage.
+
 For a project without a configured repository, such as `dlab-cuda`, `~/work` is the project root.
 For cloned projects, the root is `~/work/<repo>`.
 
-Codex and Claude keep credentials in persistent, per-lab directories below
-`storage/<lab>/state/agents/`. Codex can reuse the host login file. Claude's ordinary login uses a
-rotating refresh token, so cloning `~/.claude/.credentials.json` across VMs is not durable. Generate
-the supported one-year, inference-only token once and seed every project with it:
+Codex, Claude and opencode keep credentials in persistent, per-lab directories below
+`storage/<lab>/state/agents/`. Codex and opencode can reuse the host login file. Claude's ordinary
+login uses a rotating refresh token, so cloning `~/.claude/.credentials.json` across VMs is not
+durable. Generate the supported one-year, inference-only token once and seed every project with it:
 
 ```bash
 export CLAUDE_CODE_OAUTH_TOKEN="$(claude setup-token)"
@@ -223,16 +230,20 @@ unset CLAUDE_CODE_OAUTH_TOKEN
 
 Instead of keeping the token in the shell, save the single token line with mode `0600` at
 `~/.claude/oauth-token`; `just agent-auth` reads that path by default. The recipe copies
-`~/.codex/auth.json` and the Claude token with mode `0600`. In the guest, `~/.codex` and `~/.claude`
-point at the corresponding state directories, and the packaged `claude` launcher reads the token
-without putting it in the image. Run `dlab-agent-status` inside a guest to show both CLI versions,
-both login states, and the discovered project skills.
+`~/.codex/auth.json`, `~/.local/share/opencode/auth.json` and the Claude token with mode `0600`. In
+the guest, `~/.codex` and `~/.claude` point at the corresponding state directories, and the packaged
+`claude` launcher reads the token without putting it in the image. opencode splits its two XDG
+directories, so `~/.local/share/opencode` (credentials, session database) and `~/.config/opencode`
+(configuration) are linked separately; only `auth.json` is seeded, the rest is the guest's own. Run
+`dlab-agent-status` inside a guest to show all three CLI versions, all three login states, and the
+discovered project skills.
 
 These files are bearer credentials. They stay below the gitignored `storage/` tree, but backups of
 that tree must be protected like the accounts themselves. Re-run `just agent-auth` after signing in
 again on the host or rotating credentials. Codex also supports API-key and enterprise access-token
-login. See the official [Codex authentication](https://learn.chatgpt.com/docs/auth) and
-[Claude Code authentication](https://code.claude.com/docs/en/authentication) documentation.
+login. See the official [Codex authentication](https://learn.chatgpt.com/docs/auth),
+[Claude Code authentication](https://code.claude.com/docs/en/authentication) and
+[opencode providers](https://opencode.ai/docs/providers/) documentation.
 
 ## Secrets
 
@@ -260,7 +271,7 @@ used as an image source directly. Ubuntu's release URLs are stable and pin only 
 runs at roughly 11 MB/s, so a 1.9 GiB image costs about 2m45s against roughly three seconds for a
 local copy.
 
-The path lives in the lab's registry entry, relative to `distro_lab_path`. Anything with a scheme is
+The path lives in the lab's registry entry, relative to `storage_path`. Anything with a scheme is
 passed through unchanged, so a remote URL still works.
 
 To update one, download it, verify against the publisher's signed digests, then repoint the registry

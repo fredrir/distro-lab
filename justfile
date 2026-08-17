@@ -4,6 +4,10 @@ set dotenv-required
 
 registry := "src/labs/labs.json"
 
+# Where the VM artifacts live: images, install media, and the per-lab state
+# shares.  Named once in .env, so the checkout itself can sit anywhere.
+store := env_var("TF_VAR_storage_path")
+
 resolve := 'resolve_dir() { case "$1" in shared) echo src/vm/shared ;; *) if [[ -d "src/labs/$1/tofu" ]]; then echo "src/labs/$1/tofu" ; else echo "unknown stack: $1 (try: just labs)" >&2 ; return 1 ; fi ;; esac ; } ; labs() { for d in src/labs/*/tofu ; do [[ -d "$d" ]] || continue ; n=$(basename "$(dirname "$d")") ; [[ "$n" == _* ]] && continue ; echo "$n" ; done ; } ; stacks() { echo shared ; labs ; } ; spec() { jq -r --arg l "$1" "$2" src/labs/labs.json ; } ;'
 
 [private]
@@ -57,7 +61,7 @@ stop vm:
 reboot vm:
     virsh -c "$TF_VAR_libvirt_uri" reboot {{ vm }}
 
-# Build a nix lab's disk image into images/
+# Build a nix lab's disk image into the storage root
 [group('lab')]
 image lab:
     #!/usr/bin/env bash
@@ -73,11 +77,11 @@ image lab:
         exit 1
     fi
     out=$(nix build ".#packages.x86_64-linux.image-{{ lab }}" \
-        --out-link "images/.gcroot-{{ lab }}" --print-out-paths)
-    install -m 0644 "$out/{{ lab }}.qcow2" "images/{{ lab }}-base.qcow2"
-    qemu-img resize "images/{{ lab }}-base.qcow2" "$(spec {{ lab }} '.[$l].disk_size_bytes')"
-    readlink -f "$out" > "images/{{ lab }}-base.store-path"
-    qemu-img info "images/{{ lab }}-base.qcow2" | head -4
+        --out-link "{{ store }}/images/.gcroot-{{ lab }}" --print-out-paths)
+    install -m 0644 "$out/{{ lab }}.qcow2" "{{ store }}/images/{{ lab }}-base.qcow2"
+    qemu-img resize "{{ store }}/images/{{ lab }}-base.qcow2" "$(spec {{ lab }} '.[$l].disk_size_bytes')"
+    readlink -f "$out" > "{{ store }}/images/{{ lab }}-base.store-path"
+    qemu-img info "{{ store }}/images/{{ lab }}-base.qcow2" | head -4
 
 # Scaffold a lab: registry entry, tofu stack, storage directories
 [group('lab')]
@@ -111,7 +115,7 @@ new-lab name kind="project" distro="nixos" source_type="nix":
         | to_entries | sort_by(.key) | from_entries' {{ registry }} > "$tmp"
     mv "$tmp" {{ registry }}
 
-    mkdir -p "src/labs/$lab/tofu" "storage/$lab/state"
+    mkdir -p "src/labs/$lab/tofu" "{{ store }}/storage/$lab/state"
     sed "s|__LAB__|$lab|g" src/labs/_template/tofu/main.tf > "src/labs/$lab/tofu/main.tf"
     cp src/labs/_template/tofu/{variables.tf,versions.tf,outputs.tf} "src/labs/$lab/tofu/"
     cp src/vm/shared/.terraform.lock.hcl "src/labs/$lab/tofu/"
@@ -130,7 +134,7 @@ new-lab name kind="project" distro="nixos" source_type="nix":
 lab-keys lab:
     #!/usr/bin/env bash
     set -euo pipefail
-    s="storage/{{ lab }}/state"
+    s="{{ store }}/storage/{{ lab }}/state"
     pub="src/labs/nixos/secrets/hosts"
     mkdir -p "$s" "$pub"
     if [[ ! -f "$s/agenix.key" ]]; then
@@ -146,7 +150,7 @@ lab-keys lab:
     cp "$s/ssh_host_ed25519_key.pub" "$pub/{{ lab }}.ssh.pub"
     echo "{{ lab }} age recipient: $(cat "$pub/{{ lab }}.pub")"
 
-# Seed Codex credentials and a long-lived Claude token into project VM state
+# Seed Codex and opencode credentials plus a long-lived Claude token into project VM state
 [group('lab')]
 agent-auth lab="all":
     #!/usr/bin/env bash
@@ -155,12 +159,21 @@ agent-auth lab="all":
 
     codex_home="${CODEX_HOME:-$HOME/.codex}"
     claude_home="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+    opencode_data="${XDG_DATA_HOME:-$HOME/.local/share}/opencode"
     codex_auth="$codex_home/auth.json"
     claude_token_file="${CLAUDE_CODE_OAUTH_TOKEN_FILE:-$claude_home/oauth-token}"
     claude_token="${CLAUDE_CODE_OAUTH_TOKEN:-}"
+    opencode_auth="$opencode_data/auth.json"
 
     [[ -f "$codex_auth" ]] || { echo "missing Codex credentials: $codex_auth" >&2; exit 1; }
     jq -e type "$codex_auth" >/dev/null
+
+    if [[ ! -f "$opencode_auth" ]]; then
+        echo "missing opencode credentials: $opencode_auth" >&2
+        echo "log in on the host with: opencode auth login" >&2
+        exit 1
+    fi
+    jq -e type "$opencode_auth" >/dev/null
 
     if [[ -z "$claude_token" && -f "$claude_token_file" ]]; then
         claude_token=$(<"$claude_token_file")
@@ -184,11 +197,12 @@ agent-auth lab="all":
 
     umask 077
     for target in "${targets[@]}"; do
-        state="storage/$target/state/agents"
-        install -d -m 0700 "$state/codex" "$state/claude"
+        state="{{ store }}/storage/$target/state/agents"
+        install -d -m 0700 "$state/codex" "$state/claude" "$state/opencode" "$state/opencode/data"
         install -m 0600 "$codex_auth" "$state/codex/auth.json"
         printf '%s\n' "$claude_token" | install -m 0600 /dev/stdin "$state/claude/oauth-token"
-        echo "seeded Codex credentials and Claude token for $target"
+        install -m 0600 "$opencode_auth" "$state/opencode/data/auth.json"
+        echo "seeded Codex and opencode logins and the Claude token for $target"
     done
 
 # Rebuild a nix lab in place over SSH, no tofu
@@ -232,7 +246,7 @@ up lab:
     #!/usr/bin/env bash
     set -euo pipefail
     {{ resolve }}
-    mkdir -p "storage/{{ lab }}/state"
+    mkdir -p "{{ store }}/storage/{{ lab }}/state"
     state=$(virsh -c "$TF_VAR_libvirt_uri" domstate "{{ lab }}" 2>/dev/null || echo undefined)
     if [[ "$state" != running && "${DLAB_FORCE:-0}" != 1 ]]; then
         need=$(spec {{ lab }} '.[$l].current_memory_mib // 4096')
@@ -294,8 +308,8 @@ hold lab duration="2h":
         *[0-9]d) d="${d%d} days" ;;
     esac
     until=$(date -d "now + $d" +%s)
-    mkdir -p "storage/{{ lab }}/state"
-    echo "$until" > "storage/{{ lab }}/state/keepalive"
+    mkdir -p "{{ store }}/storage/{{ lab }}/state"
+    echo "$until" > "{{ store }}/storage/{{ lab }}/state/keepalive"
     echo "{{ lab }} held until $(date -d "@$until" '+%H:%M:%S')"
 
 # Shut a lab down cleanly so its work disk is flushed, then wait
@@ -317,7 +331,7 @@ quiesce lab:
 # Release an idle hold early
 [group('vm')]
 release lab:
-    @rm -f "storage/{{ lab }}/state/keepalive" && echo "{{ lab }} released"
+    @rm -f "{{ store }}/storage/{{ lab }}/state/keepalive" && echo "{{ lab }} released"
 
 # What the idle stopper currently sees
 [group('vm')]
@@ -329,7 +343,7 @@ idle:
     printf '%-16s %-9s %-10s %-10s %s\n' LAB STATE ALIVE IDLE HOLD
     for lab in $(labs); do
         state=$(virsh -c "$TF_VAR_libvirt_uri" domstate "$lab" 2>/dev/null || echo undefined)
-        s="storage/$lab/state"
+        s="{{ store }}/storage/$lab/state"
         a="-"; i="-"; h="-"
         [[ -f "$s/alive" ]] && a="$(( now - $(stat -c %Y "$s/alive") ))s"
         [[ -f "$s/busy" ]]  && i="$(( (now - $(stat -c %Y "$s/busy")) / 60 ))m"
@@ -356,7 +370,7 @@ df:
     set -euo pipefail
     virsh -c "$TF_VAR_libvirt_uri" vol-list "$TF_VAR_pool" --details
     echo
-    du -sh images ISOs storage 2>/dev/null || true
+    du -sh {{ store }}/images {{ store }}/ISOs {{ store }}/storage 2>/dev/null || true
 
 # What OpenTofu believes against what libvirt actually has
 [group('lab')]
@@ -479,12 +493,12 @@ doctor:
     for lab in $(labs); do
         kind=$(spec "$lab" '.[$l].source.type')
         if [[ "$kind" == nix ]]; then
-            if [[ -f "images/$lab-base.qcow2" ]]; then ok "images/$lab-base.qcow2"; else bad "images/$lab-base.qcow2 missing, run: just image $lab"; fi
+            if [[ -f "{{ store }}/images/$lab-base.qcow2" ]]; then ok "{{ store }}/images/$lab-base.qcow2"; else bad "{{ store }}/images/$lab-base.qcow2 missing, run: just image $lab"; fi
         else
             img=$(spec "$lab" '.[$l].source.image')
             case "$img" in
                 *://*) ok "$img (remote)" ;;
-                *) if [[ -f "$TF_VAR_distro_lab_path/$img" ]]; then ok "$img"; else bad "$img missing"; fi ;;
+                *) if [[ -f "{{ store }}/$img" ]]; then ok "$img"; else bad "$img missing"; fi ;;
             esac
         fi
     done
@@ -493,10 +507,10 @@ doctor:
     if [[ -x /usr/lib/virtiofsd ]]; then ok "/usr/lib/virtiofsd"; else bad "virtiofsd missing, pacman -S virtiofsd"; fi
     if [[ -f /usr/share/qemu/vhost-user/50-virtiofsd.json ]]; then ok "virtiofsd capability descriptor"; else bad "no vhost-user descriptor, managedsave of a lab with a share will fail"; fi
     for lab in $(labs); do
-        if [[ -d "storage/$lab/state" ]]; then
-            [[ "$(stat -c '%u' "storage/$lab/state")" == "$(id -u)" ]] || bad "storage/$lab/state is not owned by $(id -un)"
+        if [[ -d "{{ store }}/storage/$lab/state" ]]; then
+            [[ "$(stat -c '%u' "{{ store }}/storage/$lab/state")" == "$(id -u)" ]] || bad "{{ store }}/storage/$lab/state is not owned by $(id -un)"
         else
-            bad "storage/$lab/state missing, virtiofsd will refuse to start"
+            bad "{{ store }}/storage/$lab/state missing, virtiofsd will refuse to start"
         fi
     done
     ok "state shares for $(labs | wc -l) built labs"
@@ -568,7 +582,7 @@ apply stack *args:
     {{ resolve }}
     dir=$(resolve_dir {{ stack }})
     if [[ "{{ stack }}" != shared ]]; then
-        mkdir -p "storage/{{ stack }}/state"
+        mkdir -p "{{ store }}/storage/{{ stack }}/state"
         virsh -c "$TF_VAR_libvirt_uri" managedsave-remove "{{ stack }}" 2>/dev/null || true
     fi
     tofu -chdir="$dir" apply {{ args }}
@@ -580,7 +594,7 @@ apply-fast stack *args:
     set -euo pipefail
     {{ resolve }}
     dir=$(resolve_dir {{ stack }})
-    [[ "{{ stack }}" == shared ]] || mkdir -p "storage/{{ stack }}/state"
+    [[ "{{ stack }}" == shared ]] || mkdir -p "{{ store }}/storage/{{ stack }}/state"
     tofu -chdir="$dir" apply -refresh=false -lock=false -compact-warnings {{ args }}
 
 # Reconcile stack state against libvirt
@@ -621,7 +635,7 @@ rebuild stack:
     {{ resolve }}
     dir=$(resolve_dir {{ stack }})
     if [[ "{{ stack }}" != shared ]]; then
-        mkdir -p "storage/{{ stack }}/state"
+        mkdir -p "{{ store }}/storage/{{ stack }}/state"
         virsh -c "$TF_VAR_libvirt_uri" managedsave-remove "{{ stack }}" 2>/dev/null || true
         just quiesce "{{ stack }}"
     fi
