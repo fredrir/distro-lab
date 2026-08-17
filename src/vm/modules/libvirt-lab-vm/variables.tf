@@ -54,6 +54,8 @@ variable "cloud_config_extra" {
   default = {}
 }
 
+# Overrides the wrapper in src/vm/bin. Null takes the wrapper, which is what
+# makes a managed save restorable; a bare /usr/lib/virtiofsd here gives that up.
 variable "virtiofsd_path" {
   type    = string
   default = null

@@ -676,6 +676,22 @@ doctor:
     echo "virtiofs"
     if [[ -x /usr/lib/virtiofsd ]]; then ok "/usr/lib/virtiofsd"; else bad "virtiofsd missing, pacman -S virtiofsd"; fi
     if [[ -f /usr/share/qemu/vhost-user/50-virtiofsd.json ]]; then ok "virtiofsd capability descriptor"; else bad "no vhost-user descriptor, managedsave of a lab with a share will fail"; fi
+    # Root spawns this one, and a domain pointing at a path that is gone will
+    # not start at all, so a moved checkout has to be caught here.
+    wrapper="src/vm/bin/dlab-virtiofsd"
+    if [[ -x "$wrapper" ]]; then
+        defined=$(virsh -c "$TF_VAR_libvirt_uri" dumpxml --inactive "$(labs | head -1)" 2>/dev/null \
+            | sed -n "s:.*<binary path='\(.*\)'/>.*:\1:p")
+        if [[ -z "$defined" ]]; then
+            bad "domains do not use $wrapper, an unlinked file on a share will make managedsave unrestorable, run: just apply <lab>"
+        elif [[ -x "$defined" ]]; then
+            ok "$wrapper"
+        else
+            bad "domains point at $defined, which is not executable; the checkout moved, run: just apply <lab>"
+        fi
+    else
+        bad "$wrapper missing or not executable"
+    fi
     for lab in $(labs); do
         if [[ -d "{{ store }}/storage/$lab/state" ]]; then
             [[ "$(stat -c '%u' "{{ store }}/storage/$lab/state")" == "$(id -u)" ]] || bad "{{ store }}/storage/$lab/state is not owned by $(id -un)"

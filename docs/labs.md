@@ -213,6 +213,32 @@ seconds, measured.
 `just down` and the idle stopper delete the socket when they stop a lab, and `ControlPersist` is one
 minute to bound the window. If you ever stop a lab by other means, `rm ~/.ssh/cm-*@<lab>:*`.
 
+### A managed save is only restorable if virtiofsd can name every open inode
+
+Every lab has a virtiofs state share, and saving one serialises the share's open inodes as paths
+relative to it. An inode the guest still holds open but has **unlinked** has no path left to write
+down. virtiofsd's `--migration-on-error` defaults to `abort`, so the save succeeds and the restore
+fails:
+
+```text
+load of migration failed: Loading VM subsection 'vhost-user-fs-backend' in 'vhost-user-fs' failed
+```
+
+The lab then cannot be started at all until the RAM image is discarded — a power cut caused by one
+deleted scratch file. Measured: a single unlinked-but-open fd on the share is enough, and a save
+taken without one restores fine, which is why this shows up as an intermittent fault rather than a
+broken feature.
+
+libvirt spawns virtiofsd itself and has no XML for its migration flags, so `src/vm/bin/dlab-virtiofsd`
+wraps it with `--migration-on-error guest-error` and every domain points `<binary path>` at the
+wrapper. The restore then completes and the guest sees errors only on the offending fd, which was
+already unreachable by name and unopenable by anything else. Verified on `dlab-nixos`: an unlinked
+open fd on the share, save, restore, share still writable and the file written before the save
+intact.
+
+Because root runs the wrapper by absolute path, moving the checkout breaks every lab's ability to
+start. `just doctor` checks the path the domains actually carry, not just the file.
+
 ## Memory is dynamic, and the balloon is the cap
 
 The virtio balloon works in both directions and genuinely returns memory to the host. Measured on a
@@ -244,6 +270,59 @@ exist from boot and no `add` uevent fires.
 ```bash
 just grow dlab-archtex 16G 12
 ```
+
+## The guest is told the truth about the CPU
+
+libvirt's default topology is one single-core socket per vCPU, and QEMU invents a private 16 MiB L3
+to go with each of them. The host is a single-CCD 9800X3D where all eight cores share one 96 MiB
+V-Cache, so a 16-vCPU lab booted as shipped believed it was sixteen separate machines. Measured
+inside `dlab-ubuntu`, before and after:
+
+| | default | now |
+|---|---|---|
+| `Socket(s)` | 16 | 1 |
+| L3 as seen by the guest | 16 MiB × 16 | 96 MiB × 1 |
+| `getconf LEVEL3_CACHE_SIZE` | 16777216 | 100663296 |
+| L3 `shared_cpu_list` for cpu0 | `0` | `0-15` |
+| scheduler domain over cpu0 | `PKG ffff` | `MC ffff` |
+
+The last row is the one that matters. `PKG` is the top-level balancing domain; with no `MC` domain
+under it the guest has no notion of a shared last-level cache at all, so its cache-affinity
+heuristics never run and a thread costs nothing to migrate anywhere. Every lab now gets one socket
+of `vcpu` cores.
+
+The topology describes the hotplug **ceiling**, not the boot count — libvirt requires
+sockets × cores × threads to equal `<vcpu>`, and `vcpu_current` only decides how many come online.
+A lab grown to its ceiling with `just grow` stays one socket.
+
+`threads` stays 1. Nothing here pins a vCPU to a host thread, so a guest told that vCPU 0 and 1 are
+SMT siblings would keep work off one of them to spare a pipeline the host is free to place anywhere
+— trading the cache fiction for a scheduling one. Guest SMT is worth exposing the day these labs
+pin, and not before.
+
+Cache sizes need `<cache mode='passthrough'/>` **and** `topoext` named explicitly. AMD publishes
+cache geometry in CPUID leaf `0x8000001D`, which is only readable when `topoext` is set, and QEMU
+leaves it clear here even under `host-passthrough`. Passthrough without it leaves the guest with no
+cache sysfs whatsoever — `lscpu -C` empty, no `index3`, `getconf` silent — which is worse than the
+invented numbers it replaces.
+
+Passthrough is all or nothing — libvirt rejects `<cache level='3' mode='passthrough'/>` with
+*unsupported CPU cache level for mode 'passthrough'* — so the host's sharing counts come along with
+its sizes. The host reports L1 and L2 as shared by two threads, and a `threads='1'` guest therefore
+pairs its cores into 8 L1/L2 groups it has no SMT to justify: `lscpu` says `L2 cache: 8 MiB (8
+instances)` across 16 cores.
+
+That is a naming difference rather than a lie. `lstopo` in the guest draws one package, one NUMA
+node, one 96 MB L3, and 8 L2/L1 groups of two — structurally the host, with the two things sharing a
+private L2 called cores instead of threads. `/proc/schedstat` shows the kernel builds no cluster
+domain from it, and every count that decides how much work to start (`nproc`, `available_parallelism`,
+`OMP_PLACES=cores`) still reports the vCPUs the guest can actually run on.
+
+The alternative is `sockets=1 cores=vcpu/2 threads=2`, which mirrors the host exactly and makes the
+pairing self-consistent. It was rejected for a specific reason: vCPUs come online in enumeration
+order, so a lab booted at `vcpu_current=4` would come up as 2 cores × 2 threads rather than 4 cores,
+and pinning to make the sibling claim true would hand it 2 physical cores instead of 4. The
+grouping is cosmetic; halving a lab's cores at boot is not.
 
 ## Work survives, roots do not
 

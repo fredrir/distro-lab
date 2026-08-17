@@ -3,6 +3,15 @@ locals {
   is_nix   = var.spec.source.type == "nix"
   is_iso   = var.spec.source.type == "iso"
 
+  # libvirt spawns virtiofsd itself and offers no XML for its migration flags,
+  # so <binary path> is the only seam. The wrapper lives beside this module
+  # rather than in the environment: a lab that cannot restore its own managed
+  # save is broken in a way no .env should be able to cause by omission.
+  virtiofsd_path = coalesce(
+    var.virtiofsd_path,
+    abspath("${path.module}/../../bin/dlab-virtiofsd"),
+  )
+
   image_path = replace(var.spec.source.image_url, "file://", "")
 
   cloud_config = merge(
@@ -289,8 +298,64 @@ resource "libvirt_domain" "vm" {
     apic = {}
   }
 
+  # Left to itself libvirt hands the guest one single-core socket per vCPU, and
+  # QEMU invents a private 16 MiB L3 to go with each of them. The host is a
+  # single-CCD 9800X3D where all eight cores sit under one 96 MiB V-Cache, so
+  # that topology is not a simplification of the machine, it is the opposite of
+  # it: the guest scheduler is told migrating a thread across cores costs
+  # nothing, its cache-affinity logic is switched off by construction, and
+  # anything that sizes itself from topology — rayon, OpenMP, jemalloc arenas,
+  # make -j heuristics — reads a dozen machines where there is one. One socket
+  # of `vcpu` cores puts the whole guest back under a single shared L3.
+  #
+  # The topology has to describe the hotplug ceiling rather than the boot count:
+  # libvirt requires sockets * cores * threads to equal <vcpu>, and
+  # vcpu_current only decides how many of those come online.
+  #
+  # threads stays 1 because nothing here pins a vCPU to a host thread. A guest
+  # told that vCPU 0 and 1 are SMT siblings would keep work off one of them to
+  # spare a shared pipeline the host is free to place anywhere — trading the
+  # cache fiction for a scheduling one. Guest SMT is worth exposing the day
+  # these labs pin, and not before.
   cpu = {
     mode = "host-passthrough"
+
+    topology = {
+      sockets = 1
+      cores   = var.spec.vcpu
+      threads = 1
+    }
+
+    # Without this QEMU invents the sizes to go with the topology it invented:
+    # 64 KiB of 2-way L1d, 512 KiB of L2, and 16 MiB of L3 per socket. Cache
+    # blocked code — BLAS, jemalloc, anything that reads getconf
+    # LEVEL3_CACHE_SIZE — then sizes its tiles for 16 MiB and leaves five sixths
+    # of the V-Cache unused, which on this host is the one number worth getting
+    # right. Passthrough reports what the host actually has: 48 KiB 12-way L1d,
+    # 1 MiB L2, 96 MiB L3.
+    #
+    # topoext has to be asked for by name. AMD publishes cache sizes in CPUID
+    # leaf 0x8000001D, which is only readable when topoext is set, and QEMU
+    # leaves it clear here even under host-passthrough — measured: passthrough
+    # without it leaves the guest with no cache sysfs at all, which is worse
+    # than the invented numbers it replaces.
+    #
+    # Passthrough is all or nothing — libvirt rejects a level-scoped one — so
+    # the host's sharing counts come with its sizes, and the guest pairs its
+    # cores into 8 L1/L2 groups it has no SMT to justify. That is naming, not a
+    # lie: lstopo draws the host's own shape, the kernel builds no cluster
+    # domain from it, and every count that decides how much work to start still
+    # reports the vCPUs the guest can run on.
+    cache = {
+      mode = "passthrough"
+    }
+
+    features = [
+      {
+        name   = "topoext"
+        policy = "require"
+      }
+    ]
   }
 
   cpu_tune = {
@@ -356,8 +421,8 @@ resource "libvirt_domain" "vm" {
           type = "virtiofs"
         }
 
-        binary = var.virtiofsd_path == null ? null : {
-          path = var.virtiofsd_path
+        binary = {
+          path = local.virtiofsd_path
         }
 
         source = {
