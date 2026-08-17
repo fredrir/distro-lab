@@ -71,10 +71,10 @@
     ];
   }
   // lib.optionalAttrs (spec.kind == "project") {
+    # shell.nix enables zsh and ships its configuration under the same
+    # condition; a distro sandbox keeps the stock bash.
     shell = pkgs.zsh;
   };
-
-  programs.zsh.enable = spec.kind == "project";
 
   security.sudo.wheelNeedsPassword = false;
 

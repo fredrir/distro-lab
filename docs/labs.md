@@ -220,6 +220,112 @@ silently zero-filled a checkout's refs once. The domain now requests a guest shu
 undefine, and the justfile quiesces a lab first. If a checkout is ever unusable the clone unit moves
 it aside as `<name>.broken.<timestamp>` and reclones; it never deletes anything.
 
+## The lab shell
+
+A project lab's home disk is a freshly made ext4 filesystem, so the first login landed in
+`zsh-newuser-install` — the interactive "you have no startup files" menu — twice preceded by
+`can't find terminal definition for xterm-ghostty`. The terminfo half is one line in `core.nix` and
+applies to every lab, distro sandboxes included. The other half is fixed by shipping the shell
+instead of leaving it to the home disk.
+
+`src/labs/nixos/shell/` holds the configuration and `shell.nix` installs it:
+
+```text
+/etc/zsh/dlab/zshrc          the loader, linked into the home disk as ~/.zshrc
+/etc/zsh/dlab/conf.d/*.zsh   shipped drop-ins, read-only, replaced by `just deploy`
+~/.config/zsh/conf.d/*.zsh   yours, on the persistent home disk, read last so it wins
+```
+
+Only `kind = "project"` labs get it. A distro sandbox keeps the shell its distro ships, which is the
+whole point of a distro sandbox.
+
+Four layers load in that order, and knowing which one owns a setting saves editing the wrong file:
+
+1. NixOS's generated `/etc/zshrc` — the direnv hook, `dircolors`, autosuggestions and syntax
+   highlighting, each a module option set in `shell.nix` rather than a line written by hand.
+   `programs.zsh.promptInit` is cleared there, because the prompt arrives with the framework below.
+2. oh-my-zsh, which the loader sources immediately after `05-ohmyzsh.zsh` has chosen the plugins —
+   the same order the workstation's `.zshrc` uses, and the only order that works, since omz reads
+   `$plugins` as it loads. It brings `compinit`, the plugin set, the theme, and fzf's key bindings
+   and fuzzy completion.
+3. The rest of the shipped `conf.d` — colors, environment, history, aliases, completion styles and
+   the fzf rebinding. These land *after* omz on purpose: it is what makes `gl` mean `git log` here
+   rather than omz's `git pull`.
+4. Your own `conf.d`, for a tweak that belongs to one lab.
+
+oh-my-zsh comes from the flake pin as a read-only store path rather than a `~/.oh-my-zsh` clone, so
+`$ZSH` updates with a deploy and cannot drift. Four consequences are worth knowing, and every one of
+them is why `shell.nix` looks the way it does:
+
+- omz notices `$ZSH` is unwritable and moves its cache and completion dump to `~/.cache/oh-my-zsh`,
+  on the persistent home disk. Its self-update is inert for the same reason — the checker returns
+  early when `$ZSH` is not a git work tree, so `mode reminder` never fires.
+- `programs.zsh.enableGlobalCompInit` is **off**. omz puts each enabled plugin's directory on `fpath`
+  and then runs `compinit` itself; the global one runs before all of that, so it would dump a cache
+  built from an `fpath` missing exactly the plugins that came to extend it, and omz would rebuild it
+  anyway. The cost of the layering is that a hand-written `~/.zshrc` which does not source omz gets
+  no completion — check `$+functions[compdef]` if you write one. A login costs about 60ms.
+- `programs.fzf` is **off** and `FZF_BASE` points into the store instead, because omz's fzf plugin
+  sources the same key bindings and completion. Enabling both would do the work twice.
+- `ZSH_CUSTOM` is inside that read-only path, so the `$ZSH/custom/plugins/...` probes in
+  `05-ohmyzsh.zsh` stay false by design. autosuggestions and syntax highlighting come from the two
+  NixOS options instead, which is why the file still loads them without finding them there.
+
+`~/.zshrc` is a symlink to the shipped loader, planted by `dlab-shell-home.service` and only when
+nothing is there. A real file at that path is left alone and logged: `dlab-dotfiles` checks out the
+dotfiles repository itself, whose `setup.sh` plants its own `~/.zshrc`, and a lab that fought its own
+subject would be worthless. `/etc/zshrc` applies either way, so nothing is left with an unconfigured
+shell.
+
+To change the shell everywhere, add or edit a numbered file under `src/labs/nixos/shell/conf.d/`:
+
+```bash
+just deploy dlab-nsql   # a lab that is awake
+just sync               # the sleeping ones, left as found
+```
+
+Nothing is copied into the home disk, so a lab cannot drift from the flake — the drop-ins are read
+out of `/etc`, which is part of the system closure and replaced whole on every switch.
+
+## The lab editor
+
+Neovim needs neither a wrapper nor a plugin manager here, because it already reads a system
+configuration directory. `/etc/xdg/nvim` is second in `runtimepath`, immediately behind
+`~/.config/nvim`, and nvim sources `sysinit.vim` from there before any user configuration. So
+`nvim.nix` is three `environment.etc` entries and no service:
+
+```text
+/etc/xdg/nvim/sysinit.vim       hands over to a user config, or loads the lab's
+/etc/xdg/nvim/lua/dlab/         the configuration itself, from src/labs/nixos/nvim/
+/etc/xdg/nvim/pack/dlab/start/  plugins as store paths, loaded by nvim's own packages
+```
+
+Plugins are `vimUtils.packDir` over `pkgs.vimPlugins`, so they are part of the closure a deploy
+pushes: nothing is cloned at runtime and a lab with no network still has a working editor. The set is
+four — treesitter, catppuccin, fzf-lua and gitsigns — and treesitter is there for the grammars and
+their highlight queries, which core nvim only bundles for five languages. `vim.treesitter.start()`
+runs per buffer from an autocommand, so none of the plugin's own Lua is involved.
+
+Language servers are a table in `lua/dlab/lsp.lua`, each enabled only when its binary is on `PATH`.
+That is what keeps the editor honest about the lab it is on: `dlab-dotfiles` starts `nil`, `lua_ls`,
+`ruff` and `rust_analyzer` because its host file imports the lua, python and rust modules, and
+nothing else is configured for a language it cannot build. There is no `nvim-lspconfig` and no
+completion plugin — `vim.lsp.config` and `vim.lsp.completion` are core API in nvim 0.11 upwards, and
+`K`, `grn`, `gra`, `grr` and `gri` are already bound by default.
+
+Yanking reaches the workstation clipboard: a lab has no display server, so the `+` register is wired
+to OSC 52 and travels back over the SSH connection. Paste deliberately answers from the unnamed
+register rather than querying the terminal, since a terminal that refuses clipboard reads would make
+every `p` wait for a reply that never comes.
+
+There are two ways to change it on the lab, and they differ in scope:
+
+- `~/.config/nvim/after/plugin/*.lua` — runs after the lab config, adds to it, changes nothing else.
+  This is the equivalent of the shell's `~/.config/zsh/conf.d`.
+- `~/.config/nvim/init.lua` — a full takeover. `sysinit.vim` sees it, drops `/etc/xdg/nvim` out of
+  `packpath` so the lab's plugins do not load underneath it, and stands down. This is the case that
+  matters on `dlab-dotfiles`, where the checkout under test is a Neovim configuration.
+
 ## Agent CLIs and skills
 
 Every NixOS lab with `kind = "project"` includes `codex`, `claude`, `opencode`, and

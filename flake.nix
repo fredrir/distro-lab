@@ -54,6 +54,8 @@
             ./src/labs/nixos/modules/base.nix
             ./src/labs/nixos/modules/net.nix
             ./src/labs/nixos/modules/core.nix
+            ./src/labs/nixos/modules/shell.nix
+            ./src/labs/nixos/modules/nvim.nix
             ./src/labs/nixos/modules/state.nix
             ./src/labs/nixos/modules/idle.nix
             ./src/labs/nixos/modules/secrets.nix

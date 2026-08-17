@@ -1,0 +1,11 @@
+ZDLAB=/etc/zsh/dlab/conf.d
+ZCONF=$HOME/.config/zsh/conf.d
+
+[[ -f "$ZDLAB/05-ohmyzsh.zsh" ]] && source "$ZDLAB/05-ohmyzsh.zsh"
+[[ -f "$ZSH/oh-my-zsh.sh" ]] && source "$ZSH/oh-my-zsh.sh"
+
+for file in "$ZDLAB"/*.zsh(N) "$ZCONF"/*.zsh(N); do
+  [[ "$file" == "$ZDLAB/05-ohmyzsh.zsh" ]] && continue  # already sourced above
+  source "$file"
+done
+unset file

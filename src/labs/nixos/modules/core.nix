@@ -45,4 +45,11 @@
   };
 
   environment.variables.EDITOR = "nvim";
+
+  # A lab is only ever reached from a terminal on the host, and SSH forwards its
+  # TERM.  Without the matching terminfo every shell start prints "can't find
+  # terminal definition for xterm-ghostty" and falls back to a dumb terminal.
+  # The whole set is terminfo outputs only, so it costs kilobytes and covers
+  # wezterm and kitty too.
+  environment.enableAllTerminfo = true;
 }

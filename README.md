@@ -61,7 +61,9 @@ tofu/        a five-line stack that looks the lab up in the registry
 ```
 
 NixOS labs add an import list under `src/labs/nixos/hosts/` and draw from the
-shared modules in `src/labs/nixos/modules/`.
+shared modules in `src/labs/nixos/modules/`. `src/labs/nixos/shell/` and
+`src/labs/nixos/nvim/` are the zsh and Neovim configurations those modules ship
+to project labs.
 
 ### `agents/`
 
