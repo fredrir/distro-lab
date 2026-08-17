@@ -11,10 +11,10 @@ let
 
   name = lib.removeSuffix ".git" (lib.last (lib.splitString "/" (toString repo)));
 
-  workDir = "/home/${user}/work";
-  dest = "${workDir}/${name}";
+  homeDir = "/home/${user}";
+  dest = "${homeDir}/${name}";
   keyPath = "/run/agenix/deploy-key";
-  mountUnit = "home-${user}-work.mount";
+  mountUnit = "home-${user}.mount";
 in
 {
   config = lib.mkIf (repo != null) {
@@ -37,21 +37,21 @@ in
     };
 
     systemd.services.dlab-project = {
-      description = "Check out ${name} into ${workDir}";
+      description = "Check out ${name} into ${homeDir}";
 
       wantedBy = [ "multi-user.target" ];
       wants = [ "network-online.target" ];
       after = [
         "network-online.target"
         mountUnit
-        "dlab-work-perms.service"
+        "dlab-home-perms.service"
       ];
       requires = [
         mountUnit
-        "dlab-work-perms.service"
+        "dlab-home-perms.service"
       ];
 
-      unitConfig.ConditionPathIsMountPoint = workDir;
+      unitConfig.ConditionPathIsMountPoint = homeDir;
 
       path = [
         pkgs.git
@@ -83,7 +83,7 @@ in
             mv ${dest} "$broken"
         fi
 
-        staging=$(mktemp -d ${workDir}/.dlab-clone.XXXXXX)
+        staging=$(mktemp -d ${homeDir}/.dlab-clone.XXXXXX)
         trap 'rm -rf "$staging"' EXIT
 
         git clone ${repo} "$staging/${name}"

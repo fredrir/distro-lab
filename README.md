@@ -5,14 +5,25 @@ Bare-metal and virtual Linux distro lab hosted from Arch Linux.
 The lab keeps distro experiments separate from the main Arch installation while providing shared storage, reusable VM infrastructure, and persistent per-lab data.
 
 ## Layout
+
+The checkout, which can live anywhere:
+
+```text
 distro-lab/
 ├── flake.nix   # NixOS labs, built from the registry
-├── src/        # tracked configuration and infrastructure
+└── src/        # tracked configuration and infrastructure
+```
+
+The artifact tree it drives, named by `TF_VAR_storage_path` in `.env`:
+
+```text
+/storage/distro-lab/
 ├── images/     # VM disk images
 ├── ISOs/       # installation media
 ├── roots/      # mountpoints for bare-metal roots
 ├── EFI/        # LABEFI mountpoint
 └── storage/    # persistent per-lab data
+```
 
 ## Documentation
 - [`docs/architecture.md`](./docs/architecture.md) — host, disks, LVM, storage and state.
@@ -129,7 +140,7 @@ just rebuild dlab-nsql
 
 `init`, `validate`, `plan`, `apply`, `refresh`, `output` and `show` pass straight
 through to OpenTofu. `destroy` and `rebuild` prompt once, quiesce the lab so its
-work disk is flushed, then run unattended. Anything else is still reachable by
+home disk is flushed, then run unattended. Anything else is still reachable by
 appending arguments:
 
 ```bash

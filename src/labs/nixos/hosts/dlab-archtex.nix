@@ -2,7 +2,7 @@
 
 {
   imports = [
-    ../modules/work.nix
+    ../modules/home.nix
     ../modules/project.nix
     ../modules/cxx.nix
     ../modules/rust.nix

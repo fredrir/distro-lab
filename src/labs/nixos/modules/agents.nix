@@ -10,10 +10,9 @@ let
   user = "fredrir";
   group = "fredrir";
   homeDir = "/home/${user}";
-  workDir = "${homeDir}/work";
   stateDir = "/var/lib/dlab-state";
   stateMountUnit = "var-lib-dlab\\x2dstate.mount";
-  workMountUnit = "home-${user}-work.mount";
+  homeMountUnit = "home-${user}.mount";
 
   enabled = spec.kind == "project";
   repo = spec.repo or null;
@@ -22,7 +21,7 @@ let
       null
     else
       lib.removeSuffix ".git" (lib.last (lib.splitString "/" (toString repo)));
-  projectDir = if repoName == null then workDir else "${workDir}/${repoName}";
+  projectDir = if repoName == null then homeDir else "${homeDir}/${repoName}";
 
   catalog = builtins.fromJSON (builtins.readFile ../../../agents/skillsets.json);
   skillRoot = ../../../agents/skills;
@@ -125,8 +124,14 @@ in
     systemd.services.dlab-agent-home = {
       description = "Attach persistent Codex, Claude and opencode configuration";
       wantedBy = [ "multi-user.target" ];
-      after = [ stateMountUnit ];
-      requires = [ stateMountUnit ];
+      after = [
+        stateMountUnit
+        homeMountUnit
+      ];
+      requires = [
+        stateMountUnit
+        homeMountUnit
+      ];
 
       unitConfig.ConditionPathIsMountPoint = stateDir;
 
@@ -184,18 +189,23 @@ in
     systemd.services.dlab-agent-skills = {
       description = "Provision managed project agent skills";
       wantedBy = [ "multi-user.target" ];
+      # A lab without a repository has ~ as its project root, so .claude there is
+      # the symlink dlab-agent-home plants.  Wait for it, or mkdir wins the race
+      # and the link service moves a fresh directory aside on every boot.
       after = [
-        workMountUnit
-        "dlab-work-perms.service"
+        homeMountUnit
+        "dlab-home-perms.service"
+        "dlab-agent-home.service"
       ]
       ++ lib.optional (repo != null) "dlab-project.service";
       requires = [
-        workMountUnit
-        "dlab-work-perms.service"
+        homeMountUnit
+        "dlab-home-perms.service"
+        "dlab-agent-home.service"
       ]
       ++ lib.optional (repo != null) "dlab-project.service";
 
-      unitConfig.ConditionPathIsMountPoint = workDir;
+      unitConfig.ConditionPathIsMountPoint = homeDir;
 
       path = with pkgs; [
         coreutils
@@ -238,9 +248,9 @@ in
         exclude_pattern() {
           pattern=$1
           git_dir=$(git -C "$project" rev-parse --git-dir 2>/dev/null || true)
-          # A project without a Git checkout (for example dlab-cuda's plain
-          # ~/work root) has no per-repository exclude file to update.  Make
-          # that a successful no-op so `set -e` does not abort provisioning.
+          # A project without a Git checkout (for example dlab-cuda, whose root
+          # is just ~) has no per-repository exclude file to update.  Make that
+          # a successful no-op so `set -e` does not abort provisioning.
           [ -n "$git_dir" ] || return 0
           case "$git_dir" in
             /*) ;;

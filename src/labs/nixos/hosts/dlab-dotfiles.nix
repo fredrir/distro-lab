@@ -2,7 +2,7 @@
 
 {
   imports = [
-    ../modules/work.nix
+    ../modules/home.nix
     ../modules/project.nix
     ../modules/lua.nix
     ../modules/python.nix

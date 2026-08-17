@@ -24,8 +24,8 @@ image. Run `dlab-agent-status` in the guest after a rebuild to verify the setup.
 
 ## Persistent distro data
 
-Project labs keep work on a dedicated qcow2 mounted at `~/work`, owned by the shared stack so a lab
-rebuild cannot take it. Distro sandboxes have no work disk; anything worth keeping should be copied
+Project labs keep work on a dedicated qcow2 mounted at `~`, owned by the shared stack so a lab
+rebuild cannot take it. Distro sandboxes have no such disk; anything worth keeping should be copied
 out before a rebuild.
 
 ```text
@@ -33,11 +33,11 @@ create a lab
       ↓
 experiment
       ↓
-keep useful data in ~/work, or copy it out
+keep useful data in ~, or copy it out
       ↓
 just rebuild, or just destroy
       ↓
-work disk and storage/<lab>/ remain
+home disk and storage/<lab>/ remain
 ```
 
 ## LVM metadata snapshot

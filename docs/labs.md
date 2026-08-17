@@ -175,7 +175,10 @@ just grow dlab-archtex 16G 12
 
 Each project lab has two extra devices:
 
-- `~/work` — a qcow2 owned by the **shared** stack, so `just rebuild` cannot take it with the lab.
+- `/home/fredrir` — a qcow2 owned by the **shared** stack, so `just rebuild` cannot take it with the
+  lab. It is mounted as the home directory itself, so a checkout sits at `~/<repo>` and shell state,
+  caches and editor servers survive a rebuild along with it. The volume is still named
+  `<lab>-work.qcow2` and sized by `work_disk_bytes`; only the mount point moved.
 - `/var/lib/dlab-state` — a small virtiofs share of `storage/<lab>/state/`, carrying the age
   identity, the SSH host key, agent login state and idle markers. It is the only thing the host and
   guest share directly.
@@ -213,8 +216,8 @@ opencode needs no third copy: it walks up from the working directory and auto-lo
 guest already provisions. Its own conventions, `.opencode/skill(s)/` in a project and
 `~/.config/opencode/skill(s)/`, stay free for skills dlab does not manage.
 
-For a project without a configured repository, such as `dlab-cuda`, `~/work` is the project root.
-For cloned projects, the root is `~/work/<repo>`.
+For a project without a configured repository, such as `dlab-cuda`, `~` is the project root. For
+cloned projects, the root is `~/<repo>`.
 
 Codex, Claude and opencode keep credentials in persistent, per-lab directories below
 `storage/<lab>/state/agents/`. Codex and opencode can reuse the host login file. Claude's ordinary
