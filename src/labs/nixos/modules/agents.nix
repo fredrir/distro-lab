@@ -23,6 +23,13 @@ let
       lib.removeSuffix ".git" (lib.last (lib.splitString "/" (toString repo)));
   projectDir = if repoName == null then homeDir else "${homeDir}/${repoName}";
 
+  # Inside a checkout, .agents/skills and .claude/skills are siblings and one can
+  # be a relative link to the other, which stays valid if the repository moves.
+  # A lab without a repository has ~ as its project root, where .claude is the
+  # symlink to persistent state instead — no longer a sibling, so `../` would
+  # dangle. Keep the two directories independent there.
+  crossLink = if repoName == null then "0" else "1";
+
   catalog = builtins.fromJSON (builtins.readFile ../../../agents/skillsets.json);
   skillRoot = ../../../agents/skills;
   agentConfig = spec.agent or { };
@@ -232,7 +239,7 @@ in
         mkdir -p "$project/.agents" "$project/.claude"
 
         if [ ! -e "$agents_skills" ] && [ ! -L "$agents_skills" ]; then
-          if [ -e "$claude_skills" ] || [ -L "$claude_skills" ]; then
+          if [ ${crossLink} = 1 ] && { [ -e "$claude_skills" ] || [ -L "$claude_skills" ]; }; then
             ln -s ../.claude/skills "$agents_skills"
             exclude_agents_link=1
           else
@@ -241,8 +248,12 @@ in
         fi
 
         if [ ! -e "$claude_skills" ] && [ ! -L "$claude_skills" ]; then
-          ln -s ../.agents/skills "$claude_skills"
-          exclude_claude_link=1
+          if [ ${crossLink} = 1 ]; then
+            ln -s ../.agents/skills "$claude_skills"
+            exclude_claude_link=1
+          else
+            mkdir -p "$claude_skills"
+          fi
         fi
 
         exclude_pattern() {
@@ -311,8 +322,11 @@ in
 
         install_managed_skills "$agents_skills"
 
-        agents_real=$(readlink -f "$agents_skills")
-        claude_real=$(readlink -f "$claude_skills")
+        # A dangling link resolves to nothing and exits non-zero, which would
+        # take the whole unit down with it; an empty answer is just "not the
+        # same directory", which is what the comparison wants anyway.
+        agents_real=$(readlink -f "$agents_skills" || true)
+        claude_real=$(readlink -f "$claude_skills" || true)
         if [ "$agents_real" != "$claude_real" ]; then
           install_managed_skills "$claude_skills"
         fi

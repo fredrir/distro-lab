@@ -58,7 +58,10 @@ for lab in $("$JQ" -r 'keys[]' "$REGISTRY"); do
     idle=$(( now - $(mtime "$busy") ))
     (( idle < minutes * 60 )) && continue
 
-    if "$VIRSH" -c "$URI" dumpxml "$lab" 2>/dev/null | grep -q '<hostdev'; then
+    # grep -q exits on the first match and SIGPIPEs virsh, which pipefail then
+    # reports as failure, so read the XML into a variable before matching it.
+    xml=$("$VIRSH" -c "$URI" dumpxml "$lab" 2>/dev/null || true)
+    if grep -q '<hostdev' <<<"$xml"; then
         action=shutdown
     fi
 

@@ -37,6 +37,15 @@ ip="$prefix.$octet"
 
 domstate() { "$VIRSH" -c "$URI" domstate "$lab" 2>/dev/null || echo undefined; }
 
+# Read the whole answer before matching it: grep -q exits on the first match and
+# SIGPIPEs virsh, and pipefail reports that as failure, so piping straight into
+# it would claim there is no saved image and skip the recovery below.
+has_managed_save() {
+    local info
+    info=$("$VIRSH" -c "$URI" dominfo "$lab" 2>/dev/null || true)
+    grep -qi '^Managed save: *yes' <<<"$info"
+}
+
 wait_for_ssh() {
     local i
     for ((i = 0; i < 300; i++)); do
@@ -104,7 +113,7 @@ start_locked() {
             if ! err=$("$VIRSH" -c "$URI" start "$lab" 2>&1); then
                 if grep -qi "already active" <<<"$err"; then
                     :
-                elif "$VIRSH" -c "$URI" dominfo "$lab" 2>/dev/null | grep -qi '^Managed save: *yes'; then
+                elif has_managed_save; then
                     say "restore failed, discarding the saved RAM image: $err"
                     say "the disk is intact; this is equivalent to a power cut"
                     "$VIRSH" -c "$URI" managedsave-remove "$lab" >/dev/null 2>&1 || true

@@ -210,6 +210,55 @@ agent-auth lab="all":
 deploy lab *args:
     nix develop -c nixos-rebuild switch --flake .#{{ lab }} --target-host {{ lab }} --sudo {{ args }}
 
+# Take a new configuration to sleeping labs and leave them as found
+[group('lab')]
+sync lab="all":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    {{ resolve }}
+
+    # nixos-rebuild needs the guest reachable, so there is no offline path. All
+    # this saves is the manual boot, push and shutdown for each sleeping lab.
+
+    if [[ "{{ lab }}" == all ]]; then
+        mapfile -t targets < <(jq -r 'to_entries[] | select(.value.distro == "nixos") | .key' {{ registry }})
+    else
+        targets=("{{ lab }}")
+    fi
+
+    failed=()
+    for target in "${targets[@]}"; do
+        was=$(virsh -c "$TF_VAR_libvirt_uri" domstate "$target" 2>/dev/null || echo undefined)
+        echo "==> $target ($was)"
+
+        # A lab already awake is somebody's working lab: switch it in place and
+        # leave it running.
+        if [[ "$was" == running ]]; then
+            just deploy "$target" || failed+=("$target")
+            continue
+        fi
+
+        just up "$target" || { failed+=("$target"); continue; }
+
+        # It is going straight back down, so stage the generation rather than
+        # activating it. Nothing restarts under a live system, and a changed
+        # mount lands on the next boot instead of being swapped underneath one.
+        if nix develop -c nixos-rebuild boot --flake ".#$target" --target-host "$target" --sudo; then
+            echo "$target staged for next boot"
+        else
+            failed+=("$target")
+        fi
+
+        just quiesce "$target" || failed+=("$target")
+        rm -f "$HOME/.ssh/cm-"*"@$target:"*
+    done
+
+    if (( ${#failed[@]} )); then
+        printf 'failed: %s\n' "${failed[*]}" >&2
+        exit 1
+    fi
+    echo "synced: ${targets[*]}"
+
 # Raise a running lab's balloon and online its cpus
 [group('vm')]
 grow lab mem="" vcpu="":
@@ -269,7 +318,24 @@ up lab:
         paused)        virsh -c "$TF_VAR_libvirt_uri" resume "{{ lab }}" ;;
         pmsuspended)   virsh -c "$TF_VAR_libvirt_uri" dompmwakeup "{{ lab }}" ;;
         crashed)       virsh -c "$TF_VAR_libvirt_uri" destroy "{{ lab }}" ; virsh -c "$TF_VAR_libvirt_uri" start "{{ lab }}" ;;
-        *)             virsh -c "$TF_VAR_libvirt_uri" start "{{ lab }}" ;;
+        *)
+            # Same recovery the SSH proxy performs: a saved RAM image that will
+            # not load leaves a lab you cannot reach, and the disk is intact
+            # either way, so discarding it is strictly better than failing.
+            if ! err=$(virsh -c "$TF_VAR_libvirt_uri" start "{{ lab }}" 2>&1); then
+                info=$(virsh -c "$TF_VAR_libvirt_uri" dominfo "{{ lab }}" 2>/dev/null || true)
+                if grep -qi '^Managed save: *yes' <<<"$info"; then
+                    echo "{{ lab }}: restore failed, discarding the saved RAM image" >&2
+                    echo "  $err" >&2
+                    echo "  the disk is intact; this is equivalent to a power cut" >&2
+                    virsh -c "$TF_VAR_libvirt_uri" managedsave-remove "{{ lab }}" >/dev/null 2>&1 || true
+                    virsh -c "$TF_VAR_libvirt_uri" start "{{ lab }}"
+                else
+                    echo "$err" >&2
+                    exit 1
+                fi
+            fi
+            ;;
     esac
     ip="$TF_VAR_subnet_prefix.$(spec {{ lab }} '.[$l].net.host')"
     for _ in $(seq 1 300); do
@@ -286,7 +352,10 @@ down lab:
     set -euo pipefail
     {{ resolve }}
     action=$(spec {{ lab }} '.[$l].idle.action // "shutdown"')
-    if virsh -c "$TF_VAR_libvirt_uri" dumpxml "{{ lab }}" 2>/dev/null | grep -q '<hostdev'; then
+    # grep -q exits on the first match and SIGPIPEs virsh, which pipefail then
+    # reports as failure, so read the XML into a variable before matching it.
+    xml=$(virsh -c "$TF_VAR_libvirt_uri" dumpxml "{{ lab }}" 2>/dev/null || true)
+    if grep -q '<hostdev' <<<"$xml"; then
         action=shutdown
     fi
     case "$action" in
