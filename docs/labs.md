@@ -68,10 +68,52 @@ existed in the extended module, `system.build.toplevel` — what `nixos-rebuild 
 would have no bootloader and no root filesystem. Importing it keeps the deployed system and the built
 image as one closure.
 
-`just image` builds, installs to `images/<lab>-base.qcow2`, resizes it to the registry's
-`disk_size_bytes`, and records the store path so a rebuild is detectable. The guest's `growpart` and
-`systemd-growfs-root` expand the root filesystem on first boot, so a 5 GiB image becomes a 64 GiB
-disk without any provisioning step.
+## A root is an overlay on its base
+
+`just image` builds, compresses the result into `images/<lab>-base-<hash>.qcow2`, and records the
+store path it came from in `images/<lab>-base.store-path`. A lab's root is a thin qcow2 overlay on
+that base, holding only what the guest has written since it was created — the same arrangement the
+cloud labs have always had.
+
+The gcroot it leaves behind is on `system.build.toplevel`, not on the image. `just deploy` builds
+the toplevel and pushes that closure, so the toplevel is the thing worth keeping realised between
+deploys; the image is a one-shot input to the compressed base and is released as soon as that base
+is written. Rooting the image instead kept a full uncompressed qcow2 per lab on the host's root
+filesystem, and every superseded one stayed reachable until it was collected — 74 of them, 160 GiB,
+by the time anyone looked. The name is settled at eval time, so `just image` on an unchanged lab is
+a twelve-second evaluation rather than a rebuild.
+
+Two things follow from a base that is read-only for as long as a root names it.
+
+It cannot be rewritten in place, so it is named after the build it came from. A new `just image`
+lands beside the old one, the registry reads the new store path, and `just apply` recreates the root
+against it. `just image` then removes the bases nothing is backed by any more, and keeps the one a
+lab has not been applied off yet:
+
+```text
+keeping dlab-nsql-base-fwsfa0q7.qcow2: dlab-nsql is still backed by it, run: just apply dlab-nsql
+```
+
+And it is never resized. The overlay declares the registry's `disk_size_bytes` instead, which is
+larger than the base beneath it — qcow2 reads past the end of a backing file as zeroes, and the
+guest's `growpart` and `systemd-growfs-root` take the root filesystem out to the full size on first
+boot. So a 5 GiB image still becomes a 64 GiB disk with no provisioning step, and `just image`
+refuses a build whose virtual size has outgrown the registry's.
+
+Every disk carries `discard='unmap'`, which is what makes an overlay able to shrink. The guests
+already run `fstrim` weekly and `nix gc` weekly; without a discard to issue, the driver dropped every
+byte of that on the floor and a root only ever grew. Unmapping a cluster of an overlay writes a zero
+marker rather than a hole, so the base underneath still cannot show through:
+
+```text
+overlay at boot        24M
+wrote 2 GiB           2.1G
+rm + fstrim            37M
+```
+
+The base is compressed with zstd, which measured 3.4x across the nix labs. Nothing writes to it, so
+the cost is one decompress per cluster read — next to nothing beside a seek on the disk it lives
+on, and it reads fewer bytes off the platter to begin with.
 
 Day two never goes through tofu:
 

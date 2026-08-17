@@ -13,6 +13,26 @@ locals {
     netmask      = cidrnetmask("${local.net.subnet_prefix}.0/${local.net.prefix_length}")
   }
 
+  # A nix lab's root is a thin overlay on its base, so the base is read-only for
+  # as long as any root names it and can never be rewritten in place. `just
+  # image` names each base after the store path it was built from and records
+  # that path here; a new build lands beside the old one, this reads a different
+  # backing path, and the root is recreated against it.
+  #
+  # Before the first `just image` there is nothing to read. Falling back to the
+  # unstamped name keeps `just new-lab` — which applies the shared stack before
+  # any image exists — working, and `just doctor` reports the real problem.
+  nix_base = {
+    for name, lab in var.labs : name => (
+      fileexists("${var.storage_path}/images/${name}-base.store-path")
+      ? "${var.storage_path}/images/${name}-base-${substr(
+        basename(trimspace(file("${var.storage_path}/images/${name}-base.store-path"))), 0, 8
+      )}.qcow2"
+      : "${var.storage_path}/images/${name}-base.qcow2"
+    )
+    if lab.source.type == "nix"
+  }
+
   labs = {
     for name, lab in var.labs : name => {
       name   = name
@@ -36,7 +56,7 @@ locals {
 
         image_url = (
           lab.source.type == "nix"
-          ? "file://${var.storage_path}/images/${name}-base.qcow2"
+          ? "file://${local.nix_base[name]}"
           : (
             can(regex("^[a-z0-9+.-]+://", lab.source.image))
             ? lab.source.image

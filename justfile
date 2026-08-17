@@ -76,12 +76,92 @@ image lab:
         echo "stage them first: git add -N <files>" >&2
         exit 1
     fi
-    out=$(nix build ".#packages.x86_64-linux.image-{{ lab }}" \
-        --out-link "{{ store }}/images/.gcroot-{{ lab }}" --print-out-paths)
-    install -m 0644 "$out/{{ lab }}.qcow2" "{{ store }}/images/{{ lab }}-base.qcow2"
-    qemu-img resize "{{ store }}/images/{{ lab }}-base.qcow2" "$(spec {{ lab }} '.[$l].disk_size_bytes')"
-    readlink -f "$out" > "{{ store }}/images/{{ lab }}-base.store-path"
-    qemu-img info "{{ store }}/images/{{ lab }}-base.qcow2" | head -4
+    # Pin the system rather than the image. `just deploy` and `just sync` build
+    # system.build.toplevel and push that closure, so it is the thing worth
+    # keeping realised between deploys — and it is a third of the size. The
+    # image is a one-shot input to the compressed base below: it holds a gcroot
+    # only for as long as it takes to write that base, and the store is free to
+    # collect it afterwards.
+    nix build ".#nixosConfigurations.{{ lab }}.config.system.build.toplevel" \
+        --out-link "{{ store }}/images/.gcroot-{{ lab }}"
+
+    # A root is a thin overlay on the base now, and libvirt keeps it open for
+    # as long as the lab exists, so a base can never be rewritten in place.
+    # Name it after the build it came from and let a new one land beside the
+    # old: the registry reads the same store path and points the next
+    # `just apply` at whichever base is current.
+    #
+    # Evaluated rather than built, because the name is settled at eval time. An
+    # image whose base is already written is one there is no reason to realise.
+    store_path=$(nix eval --raw ".#packages.x86_64-linux.image-{{ lab }}.outPath")
+    stamp=$(basename "$store_path")
+    base="{{ store }}/images/{{ lab }}-base-${stamp:0:8}.qcow2"
+
+    build_link="{{ store }}/images/.gcroot-{{ lab }}.build"
+    cleanup() { rm -f "$build_link" "$base.partial"; }
+    trap cleanup EXIT
+
+    if [[ -f "$base" ]]; then
+        echo "{{ lab }}: $(basename "$base") is already current"
+    else
+        out=$(nix build ".#packages.x86_64-linux.image-{{ lab }}" \
+            --out-link "$build_link" --print-out-paths)
+
+        # The overlay declares disk_size_bytes and qcow2 reads past the end of a
+        # backing file as zeroes, so the base is left at its natural size rather
+        # than resized. The one thing that cannot happen is a base larger than
+        # the overlay that sits on it.
+        want=$(spec {{ lab }} '.[$l].disk_size_bytes')
+        have=$(qemu-img info --output=json "$out/{{ lab }}.qcow2" | jq -r '.["virtual-size"]')
+        if (( have > want )); then
+            echo "{{ lab }}: the built image is $(numfmt --to=iec "$have") virtual, over the registry's disk_size_bytes ($(numfmt --to=iec "$want"))" >&2
+            echo "an overlay cannot be smaller than its base; raise disk_size_bytes in {{ registry }}" >&2
+            exit 1
+        fi
+
+        # zstd rather than the plain qcow2 the flake builds: the base is
+        # read-only under the overlay, so this costs one decompress per cluster
+        # read — nothing beside a seek on the disk it lives on — and takes
+        # about two thirds off the file. Measured 3.4x across the nix labs.
+        qemu-img convert -c -O qcow2 -o compression_type=zstd \
+            "$out/{{ lab }}.qcow2" "$base.partial"
+        chmod 0644 "$base.partial"
+        mv "$base.partial" "$base"
+    fi
+    printf '%s\n' "$store_path" > "{{ store }}/images/{{ lab }}-base.store-path"
+    virsh -c "$TF_VAR_libvirt_uri" pool-refresh "$TF_VAR_pool" >/dev/null 2>&1 || true
+
+    # An older base stays until nothing is backed by it. A lab still naming one
+    # has not been applied against the new image yet, and taking it away would
+    # take the guest's root with it.
+    if virsh -c "$TF_VAR_libvirt_uri" pool-info "$TF_VAR_pool" >/dev/null 2>&1; then
+        # No root volume means no overlay, so nothing is backed by anything and
+        # every older base is loose. Guard on the pool separately: a libvirt we
+        # cannot reach must not read as "nothing is using these".
+        live=""
+        if xml=$(virsh -c "$TF_VAR_libvirt_uri" vol-dumpxml "{{ lab }}.qcow2" "$TF_VAR_pool" 2>/dev/null); then
+            live=$(sed -n '/<backingStore>/,/<\/backingStore>/p' <<<"$xml" \
+                | sed -n 's:.*<path>\(.*\)</path>.*:\1:p')
+        fi
+        shopt -s nullglob
+        for old in "{{ store }}/images/{{ lab }}"-base-*.qcow2; do
+            if [[ "$old" == "$base" ]]; then
+                continue
+            elif [[ "$old" == "$live" ]]; then
+                echo "keeping $(basename "$old"): {{ lab }} is still backed by it, run: just apply {{ lab }}"
+            else
+                rm -f "$old"
+                echo "removed stale base $(basename "$old")"
+            fi
+        done
+    else
+        echo "note  cannot reach pool $TF_VAR_pool, leaving older bases in place" >&2
+    fi
+
+    # Reported by stat rather than read out of the file: libvirt hands the whole
+    # backing chain to the qemu user when a lab first boots and does not hand it
+    # back, so re-running this must not depend on being able to open the base.
+    printf '%s  %s compressed\n' "$(basename "$base")" "$(du -h "$base" | cut -f1)"
 
 # Scaffold a lab: registry entry, tofu stack, storage directories
 [group('lab')]
@@ -391,7 +471,13 @@ quiesce lab:
     echo "quiescing {{ lab }} so buffered writes reach the work disk"
     virsh -c "$TF_VAR_libvirt_uri" shutdown --mode agent,acpi "{{ lab }}" >/dev/null 2>&1 || true
     for _ in $(seq 1 120); do
-        [[ "$(virsh -c "$TF_VAR_libvirt_uri" domstate "{{ lab }}" 2>/dev/null)" == "shut off" ]] && exit 0
+        if [[ "$(virsh -c "$TF_VAR_libvirt_uri" domstate "{{ lab }}" 2>/dev/null)" == "shut off" ]]; then
+            # A control master outlives the guest it was opened to, and doctor
+            # reports one left for a stopped lab. `just down` clears its own; a
+            # lab stopped on the way through an apply or a sync needs the same.
+            rm -f "$HOME/.ssh/cm-"*"@{{ lab }}:"*
+            exit 0
+        fi
         sleep 1
     done
     echo "{{ lab }} did not shut down in 120s; destroying it will lose unflushed writes" >&2
@@ -562,7 +648,22 @@ doctor:
     for lab in $(labs); do
         kind=$(spec "$lab" '.[$l].source.type')
         if [[ "$kind" == nix ]]; then
-            if [[ -f "{{ store }}/images/$lab-base.qcow2" ]]; then ok "{{ store }}/images/$lab-base.qcow2"; else bad "{{ store }}/images/$lab-base.qcow2 missing, run: just image $lab"; fi
+            # The base is named after the build it came from, so the stamp is
+            # what says which file the registry will hand libvirt.
+            stamp="{{ store }}/images/$lab-base.store-path"
+            if [[ ! -f "$stamp" ]]; then
+                bad "$stamp missing, run: just image $lab"
+            else
+                h=$(basename "$(cat "$stamp")")
+                b="{{ store }}/images/$lab-base-${h:0:8}.qcow2"
+                if [[ -f "$b" ]]; then ok "$b"; else bad "$b missing, run: just image $lab"; fi
+            fi
+            # The unstamped name is what a nix lab's base was called before a
+            # root became an overlay on it. Nothing reads it any more, and
+            # nothing is backed by it — the roots of that era were full copies.
+            old="{{ store }}/images/$lab-base.qcow2"
+            [[ -f "$old" ]] && printf '  note  %s predates the overlay layout and is unused, rm it to reclaim %s\n' \
+                "$old" "$(du -h "$old" | cut -f1)"
         else
             img=$(spec "$lab" '.[$l].source.image')
             case "$img" in
@@ -658,6 +759,26 @@ apply stack *args:
     dir=$(resolve_dir {{ stack }})
     if [[ "{{ stack }}" != shared ]]; then
         mkdir -p "{{ store }}/storage/{{ stack }}/state"
+
+        # A root is an overlay, so a base the lab is not already sitting on
+        # means tofu replaces that root. Unlinking a volume under a running
+        # guest leaves it writing into an inode nothing can reach any more, so
+        # take the lab down first — and only then, because an apply that
+        # replaces nothing has no business stopping a lab someone is using.
+        stamp="{{ store }}/images/{{ stack }}-base.store-path"
+        if [[ -f "$stamp" ]]; then
+            h=$(basename "$(cat "$stamp")")
+            want="{{ store }}/images/{{ stack }}-base-${h:0:8}.qcow2"
+            have=""
+            if xml=$(virsh -c "$TF_VAR_libvirt_uri" vol-dumpxml "{{ stack }}.qcow2" "$TF_VAR_pool" 2>/dev/null); then
+                have=$(sed -n '/<backingStore>/,/<\/backingStore>/p' <<<"$xml" \
+                    | sed -n 's:.*<path>\(.*\)</path>.*:\1:p')
+            fi
+            if [[ "$want" != "$have" ]]; then
+                just quiesce "{{ stack }}"
+            fi
+        fi
+
         virsh -c "$TF_VAR_libvirt_uri" managedsave-remove "{{ stack }}" 2>/dev/null || true
     fi
     tofu -chdir="$dir" apply {{ args }}

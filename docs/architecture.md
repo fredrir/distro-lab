@@ -182,9 +182,10 @@ flake.nix             NixOS labs, at the repository root
 Disks live under:
 
 ```text
-<storage_path>/images/dlab-nsql.qcow2         root, disposable
-<storage_path>/images/dlab-nsql-base.qcow2    the built image it was copied from
-<storage_path>/images/dlab-nsql-work.qcow2    ~, owned by the shared stack, survives a rebuild
+<storage_path>/images/dlab-nsql.qcow2               root, disposable, a thin overlay on the base
+<storage_path>/images/dlab-nsql-base-<hash>.qcow2  the built image, compressed and read-only
+<storage_path>/images/dlab-nsql-base.store-path    which build that base came from
+<storage_path>/images/dlab-nsql-work.qcow2         ~, owned by the shared stack, survives a rebuild
 ```
 
 Per-lab host state lives under:

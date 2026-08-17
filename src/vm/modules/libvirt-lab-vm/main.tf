@@ -45,8 +45,16 @@ locals {
       bus = "virtio"
     }
 
+    # Without this the guest's weekly fstrim is thrown away at the virtio-blk
+    # layer: the trim reaches the driver, the driver has no discard to issue,
+    # and the qcow2 keeps every cluster the guest has stopped using. A lab that
+    # runs nix gc every week and never gives a byte back is the whole reason a
+    # root only ever grew. Unmapping a cluster of an overlay writes a zero
+    # marker rather than a hole, so the base underneath still cannot show
+    # through.
     driver = {
-      type = "qcow2"
+      type    = "qcow2"
+      discard = "unmap"
     }
   }
 
@@ -64,8 +72,11 @@ locals {
         bus = "virtio"
       }
 
+      # The home disk survives a rebuild, so it is the one that accumulates
+      # across the longest span — build trees, node_modules, cargo targets.
       driver = {
-        type = "qcow2"
+        type    = "qcow2"
+        discard = "unmap"
       }
     }
   ]
@@ -158,7 +169,7 @@ resource "libvirt_volume" "base" {
 resource "libvirt_volume" "root" {
   name     = "${var.name}.qcow2"
   pool     = var.pool
-  capacity = local.is_nix ? null : var.spec.disk_size_bytes
+  capacity = var.spec.disk_size_bytes
 
   target = {
     format = {
@@ -166,21 +177,35 @@ resource "libvirt_volume" "root" {
     }
   }
 
-  backing_store = one([
-    for v in libvirt_volume.base : {
-      path = v.path
+  # Every root that has a base is a thin overlay on it, holding only what the
+  # guest has written since it was created. A cloud lab's base is uploaded by
+  # this module; a nix lab's is built and compressed by `just image` straight
+  # into the pool directory, so that one is backed by path rather than by a
+  # resource here. An iso lab has no base and gets an empty disk to install on.
+  #
+  # The overlay declares the registry's disk_size_bytes, which is larger than
+  # the base it sits on — qcow2 reads past the end of a backing file as zeroes,
+  # and the guest's growpart and x-systemd.growfs take the root filesystem out
+  # to the full size on first boot. That is why the base is never resized.
+  backing_store = (
+    local.is_nix
+    ? {
+      path = local.image_path
 
       format = {
         type = "qcow2"
       }
     }
-  ])
+    : one([
+      for v in libvirt_volume.base : {
+        path = v.path
 
-  create = local.is_nix ? {
-    content = {
-      url = var.spec.source.image_url
-    }
-  } : null
+        format = {
+          type = "qcow2"
+        }
+      }
+    ])
+  )
 }
 
 
