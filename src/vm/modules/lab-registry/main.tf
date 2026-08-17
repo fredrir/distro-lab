@@ -1,4 +1,18 @@
 locals {
+  # Read rather than passed in: NixOS labs bake their own address into the image
+  # at build time, and a flake cannot see the environment .env lives in. One
+  # tracked file is the only way the image and the reservation cannot disagree.
+  net = jsondecode(file("${path.module}/../../../labs/network.json"))
+
+  network = {
+    subnet_prefix = local.net.subnet_prefix
+    prefix_length = local.net.prefix_length
+    domain        = local.net.domain
+
+    gateway_ipv4 = "${local.net.subnet_prefix}.${local.net.gateway_host}"
+    netmask      = cidrnetmask("${local.net.subnet_prefix}.0/${local.net.prefix_length}")
+  }
+
   labs = {
     for name, lab in var.labs : name => {
       name   = name
@@ -13,7 +27,7 @@ locals {
         substr(md5(name), 4, 2),
       ])
 
-      ipv4 = "${var.subnet_prefix}.${lab.net.host}"
+      ipv4 = "${local.net.subnet_prefix}.${lab.net.host}"
 
       source = {
         type       = lab.source.type

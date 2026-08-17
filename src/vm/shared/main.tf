@@ -6,9 +6,8 @@ provider "libvirt" {
 module "registry" {
   source = "../modules/lab-registry"
 
-  labs            = jsondecode(file("${path.module}/../../labs/labs.json"))
+  labs         = jsondecode(file("${path.module}/../../labs/labs.json"))
   storage_path = var.storage_path
-  subnet_prefix   = var.subnet_prefix
 }
 
 
@@ -41,8 +40,10 @@ resource "libvirt_network" "dlab" {
     stp  = "on"
   }
 
+  # The DNS domain is a guest-visible fact, so it comes from the registry's
+  # network file alongside the subnet, not from the name of the libvirt object.
   domain = {
-    name       = var.network
+    name       = module.registry.network.domain
     local_only = "yes"
   }
 
@@ -68,9 +69,12 @@ resource "libvirt_network" "dlab" {
 
   ips = [
     {
-      address = "${var.subnet_prefix}.1"
-      netmask = "255.255.255.0"
+      address = module.registry.network.gateway_ipv4
+      netmask = module.registry.network.netmask
 
+      # NixOS labs configure their address statically and never ask, but the
+      # reservations stay: they are what makes the address theirs to bake in,
+      # and the cloud and iso labs still lease.
       dhcp = {
         hosts = [
           for lab in module.registry.labs : {

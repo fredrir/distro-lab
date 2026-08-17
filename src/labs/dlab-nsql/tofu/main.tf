@@ -15,9 +15,8 @@ locals {
 module "registry" {
   source = "../../../vm/modules/lab-registry"
 
-  labs            = jsondecode(file("${path.module}/../../labs.json"))
+  labs         = jsondecode(file("${path.module}/../../labs.json"))
   storage_path = var.storage_path
-  subnet_prefix   = var.subnet_prefix
 }
 
 

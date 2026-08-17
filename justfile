@@ -8,7 +8,7 @@ registry := "src/labs/labs.json"
 # shares.  Named once in .env, so the checkout itself can sit anywhere.
 store := env_var("TF_VAR_storage_path")
 
-resolve := 'resolve_dir() { case "$1" in shared) echo src/vm/shared ;; *) if [[ -d "src/labs/$1/tofu" ]]; then echo "src/labs/$1/tofu" ; else echo "unknown stack: $1 (try: just labs)" >&2 ; return 1 ; fi ;; esac ; } ; labs() { for d in src/labs/*/tofu ; do [[ -d "$d" ]] || continue ; n=$(basename "$(dirname "$d")") ; [[ "$n" == _* ]] && continue ; echo "$n" ; done ; } ; stacks() { echo shared ; labs ; } ; spec() { jq -r --arg l "$1" "$2" src/labs/labs.json ; } ;'
+resolve := 'resolve_dir() { case "$1" in shared) echo src/vm/shared ;; *) if [[ -d "src/labs/$1/tofu" ]]; then echo "src/labs/$1/tofu" ; else echo "unknown stack: $1 (try: just labs)" >&2 ; return 1 ; fi ;; esac ; } ; labs() { for d in src/labs/*/tofu ; do [[ -d "$d" ]] || continue ; n=$(basename "$(dirname "$d")") ; [[ "$n" == _* ]] && continue ; echo "$n" ; done ; } ; stacks() { echo shared ; labs ; } ; spec() { jq -r --arg l "$1" "$2" src/labs/labs.json ; } ; net() { jq -r "$1" src/labs/network.json ; } ; labip() { local o ; o=$(spec "$1" ".[\$l].net.host") ; if [[ "$o" == null ]] ; then return 1 ; fi ; echo "$(net .subnet_prefix).$o" ; } ;'
 
 [private]
 default:
@@ -19,6 +19,7 @@ default:
 vms:
     #!/usr/bin/env bash
     set -euo pipefail
+    {{ resolve }}
     printf '%-16s %-9s %-16s %5s %8s\n' NAME STATE IP VCPU MEM
     for vm in $(virsh -c "$TF_VAR_libvirt_uri" list --all --name); do
         info=$(virsh -c "$TF_VAR_libvirt_uri" dominfo "$vm")
@@ -26,15 +27,14 @@ vms:
         vcpu=$(sed -n 's/^CPU(s): *//p' <<<"$info")
         kib=$(sed -n 's/^Max memory: *\([0-9]*\).*/\1/p' <<<"$info")
         mem=$(awk -v k="$kib" 'BEGIN {printf "%.1fG", k / 1048576}')
-        ip=$(virsh -c "$TF_VAR_libvirt_uri" domifaddr "$vm" --source lease 2>/dev/null |
-            awk '$3 == "ipv4" {split($4, a, "/"); print a[1]; exit}' || true)
+        ip=$(labip "$vm" 2>/dev/null || true)
         printf '%-16s %-9s %-16s %5s %8s\n' "$vm" "$state" "${ip:--}" "$vcpu" "$mem"
     done
 
-# Current DHCP lease address of a VM
+# Registry address of a VM
 [group('vm')]
 ip vm:
-    @virsh -c "$TF_VAR_libvirt_uri" domifaddr {{ vm }} --source lease | awk '$3 == "ipv4" {split($4, a, "/"); print a[1]; exit}'
+    @{{ resolve }} labip {{ vm }}
 
 # SSH into a VM, optionally running a command
 [group('vm')]
@@ -122,7 +122,7 @@ new-lab name kind="project" distro="nixos" source_type="nix":
     tofu -chdir="src/labs/$lab/tofu" init -input=false >/dev/null
     tofu -chdir=src/vm/shared apply -auto-approve >/dev/null
 
-    echo "created $lab at $TF_VAR_subnet_prefix.$octet"
+    echo "created $lab at $(labip "$lab")"
     if [[ "{{ source_type }}" == nix ]]; then
         echo "next: write src/labs/nixos/hosts/$lab.nix, then: just image $lab && just apply $lab"
     else
@@ -337,7 +337,7 @@ up lab:
             fi
             ;;
     esac
-    ip="$TF_VAR_subnet_prefix.$(spec {{ lab }} '.[$l].net.host')"
+    ip=$(labip {{ lab }})
     for _ in $(seq 1 300); do
         nc -z -w1 "$ip" 22 2>/dev/null && { echo "{{ lab }} up on $ip"; exit 0; }
         sleep 1
@@ -586,8 +586,14 @@ doctor:
 
     echo "network"
     live=$(virsh -c "$TF_VAR_libvirt_uri" net-dumpxml "$TF_VAR_network" 2>/dev/null || true)
+    gw="$(net .subnet_prefix).$(net .gateway_host)"
+    grep -q "address='$gw'" <<<"$live" \
+        || bad "$TF_VAR_network is not on $gw, but every nix image has that gateway baked in, run: just apply shared"
     for lab in $(jq -r 'keys[]' {{ registry }}); do
-        grep -q "name='$lab'" <<<"$live" || bad "$lab has no DHCP reservation, run: just apply shared"
+        # Match the address too: a nix lab configures its address statically, so
+        # a reservation that moved leaves the guest sitting on the old one.
+        grep -q "name='$lab' ip='$(labip "$lab")'" <<<"$live" \
+            || bad "$lab has no DHCP reservation at $(labip "$lab"), run: just apply shared"
     done
     [[ -n "$live" ]] && ok "$(jq -r 'keys | length' {{ registry }}) reservations checked"
 

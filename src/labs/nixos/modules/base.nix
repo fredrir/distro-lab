@@ -27,7 +27,6 @@
   ];
 
   networking.hostName = lab;
-  networking.useDHCP = lib.mkDefault true;
 
   time.timeZone = "Europe/Oslo";
 

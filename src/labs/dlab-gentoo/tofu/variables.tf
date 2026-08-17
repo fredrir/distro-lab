@@ -14,10 +14,6 @@ variable "network" {
   type = string
 }
 
-variable "subnet_prefix" {
-  type = string
-}
-
 variable "username" {
   type = string
 }

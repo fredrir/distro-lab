@@ -110,8 +110,3 @@ variable "labs" {
 variable "storage_path" {
   type = string
 }
-
-variable "subnet_prefix" {
-  type    = string
-  default = "192.168.123"
-}

@@ -22,9 +22,14 @@ dlab-cuda                                GPU workspace
 validated map and derives the MAC and the image URL. Both the shared stack and every lab stack
 instantiate that module, which is why they cannot disagree about a lab's address.
 
-A lab's tofu stack is five lines that look the entry up by name. `.env` holds only the seven values
-that are genuinely per-machine — libvirt URI, paths, pool, network, subnet, username, SSH keys — and
-does not grow when you add a lab.
+`src/labs/network.json` sits beside it and holds the four facts that are about the network rather
+than about a lab: subnet prefix, prefix length, the gateway's octet and the DNS domain. The registry
+module reads it directly instead of taking it as a variable, and `flake.nix` reads the same file, so
+a NixOS image and the DHCP reservation for it cannot end up on different subnets.
+
+A lab's tofu stack is five lines that look the entry up by name. `.env` holds only the six values
+that are genuinely per-machine — libvirt URI, paths, pool, network, username, SSH keys — and does not
+grow when you add a lab.
 
 Validation lives in the type, so `tofu validate` catches a bad entry rather than the module failing
 three resources deep. Notably `gpu_pci` being non-empty forbids `idle.action = "managedsave"`, because
@@ -87,7 +92,34 @@ ssh dlab-nsql
 
 `src/vm/bin/dlab-ssh-proxy` is the `ProxyCommand`. If the lab is running and answering it execs
 straight through; otherwise it takes a lock, starts or restores the lab, waits for SSH and then
-connects. Addresses are static DHCP reservations from the registry, so there is no lease polling.
+connects. Addresses come from the registry, so there is no lease polling.
+
+## Addresses are decided before the guest boots
+
+A lab's address is `network.json`'s prefix plus its `net.host` octet. That is fixed at build time,
+so a NixOS lab does not ask for it: `net.nix` writes one static systemd-networkd link, and
+`networking.useDHCP` is off.
+
+The cost of asking was not small. dhcpcd took **7.6s of every cold boot** — 46% of userspace, and on
+the critical chain, because `dlab-project.service` waits for `network-online.target`. Almost none of
+it was the DHCP exchange itself: it was ARP conflict probing for an address no other guest can be
+handed, then waiting for IPv6 router advertisements a NAT network with no IPv6 will never send.
+
+```text
+multi-user.target @16.433s          before                 after
+  └─dhcpcd.service @8.741s +7.581s  ─────────────────────  gone
+```
+
+Two things follow:
+
+- The reservations in the shared stack stay. They are what makes an address the lab's to bake in, and
+  the cloud and iso labs — Ubuntu, Gentoo — still lease normally.
+- Nothing probes for a conflict any more, so two labs on one octet would simply collide in silence.
+  `just doctor` checks that octets are unique, that each reservation is at the address the image
+  expects, and that the network's gateway is the one the images route through.
+
+`just ip` and `just vms` read the registry rather than `virsh domifaddr --source lease`; a static
+guest has no lease to report.
 
 It refuses to start a lab the host cannot afford, printing what is awake and how to stop it.
 `DLAB_FORCE=1` overrides.

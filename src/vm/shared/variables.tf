@@ -13,7 +13,3 @@ variable "pool" {
 variable "network" {
   type = string
 }
-
-variable "subnet_prefix" {
-  type = string
-}

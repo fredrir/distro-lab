@@ -103,13 +103,18 @@ template and edit it:
 cp .env.example .env
 ```
 
-It holds seven `TF_VAR_*` entries — libvirt URI, lab path, pool, network,
-subnet, username and SSH keys — and does not grow when you add a lab. Per-lab
-sizing, images, repositories and secrets live in the registry instead. Nothing
-has a default, so a missing entry fails the run rather than silently falling
-back.
+It holds six `TF_VAR_*` entries — libvirt URI, lab path, pool, network, username
+and SSH keys — and does not grow when you add a lab. Per-lab sizing, images,
+repositories and secrets live in the registry instead. Nothing has a default, so
+a missing entry fails the run rather than silently falling back.
 
 `.env` is not tracked. `.env.example` is.
+
+The subnet is **not** in `.env`. A NixOS lab configures its address statically,
+baked in at image build time from `src/labs/network.json`, and a flake cannot
+read the environment — so the subnet has to be a tracked file for the image and
+the reservation to agree. `src/vm/modules/lab-registry/` and `flake.nix` both
+read it.
 
 ## Usage
 
