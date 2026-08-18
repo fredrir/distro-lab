@@ -258,6 +258,14 @@ host, so a lab that over-allocates becomes slow or unreachable while the host st
 is the right way round, since a host OOM takes your desktop with it. NixOS labs run guest zram to
 soften that; the cloud images do not.
 
+That zram is sized from `current_memory_mib`, not from what the guest counts at boot. A lab boots
+seeing `memory_mib` and the balloon only takes the pages away afterwards, so a plain percentage of
+MemTotal sizes the swap device against memory the lab never gets to keep — dlab-nixos measured an
+11.1 GiB zram device inside a 3.5 GiB guest, which thrashes rather than softens. `vm.swappiness` is
+150 for the same reason: zram is RAM, and reclaiming a page from it costs a compress rather than a
+seek, so the kernel should reach for it before it starts evicting page cache. Both are settled at
+boot, so a lab that has been through `just grow` keeps the device it booted with.
+
 `memory_mib` remains the number the admission guard uses, because it is the worst case a lab can
 reach if you grow it. Note the guard checks `MemAvailable` at start time while RSS grows lazily
 afterwards, so three labs can each pass and then contend — keep an eye on `just vms` if you run

@@ -35,9 +35,17 @@ resource "libvirt_network" "dlab" {
   name      = var.network
   autostart = true
 
+  # STP off. A newly added tap is blocked through listening and learning before
+  # it forwards a frame, and the kernel clamps forward delay to a 2 s minimum
+  # whenever STP is on — libvirt asks for delay='0' and gets 200 regardless — so
+  # every start costs about 4 s of unreachability. A cold boot hides it behind
+  # the guest's own 7.3 s, but a managedsave restore is alive in a second or two
+  # and then sits waiting on the bridge, which is the wake path that should feel
+  # instant. Nothing here needs the protocol: this is a NAT bridge carrying tap
+  # devices and no external port, so there is no second path to loop through.
   bridge = {
     name = "virbr-dlab"
-    stp  = "on"
+    stp  = "off"
   }
 
   # The DNS domain is a guest-visible fact, so it comes from the registry's

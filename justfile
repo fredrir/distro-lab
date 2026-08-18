@@ -93,7 +93,11 @@ image lab:
     #
     # Evaluated rather than built, because the name is settled at eval time. An
     # image whose base is already written is one there is no reason to realise.
-    store_path=$(nix eval --raw ".#packages.x86_64-linux.image-{{ lab }}.outPath")
+    #
+    # --offline because this reads locked inputs and nothing else. Without it a
+    # cold evaluator spends 90 seconds off-CPU re-checking inputs the lock file
+    # already pins; the nix build above has fetched everything it could need.
+    store_path=$(nix eval --offline --raw ".#packages.x86_64-linux.image-{{ lab }}.outPath")
     stamp=$(basename "$store_path")
     base="{{ store }}/images/{{ lab }}-base-${stamp:0:8}.qcow2"
 
@@ -304,6 +308,29 @@ sync lab="all":
         mapfile -t targets < <(jq -r 'to_entries[] | select(.value.distro == "nixos") | .key' {{ registry }})
     else
         targets=("{{ lab }}")
+    fi
+
+    # Realise every system up front, in one evaluator. The loop below reaches
+    # nixos-rebuild once per lab and each of those is a fresh process: the
+    # first pays the cold-start cost of the flake's inputs, and every one of
+    # them builds its derivations under whatever max-jobs the host allows. One
+    # nix build over all six pays the cold start once and lets the store
+    # schedule the labs against each other, so the loop is left with the part
+    # that genuinely has to be serial — boot, push, shut down.
+    #
+    # --no-link rather than a gcroot, because the rebuild below evaluates its
+    # way back to these same paths: the worst a collection in between can cost
+    # is the rebuild this was meant to save, and never correctness.
+    if (( ${#targets[@]} > 1 )); then
+        echo "==> building ${#targets[@]} systems"
+        attrs=()
+        for lab in "${targets[@]}"; do
+            attrs+=(".#nixosConfigurations.$lab.config.system.build.toplevel")
+        done
+        # Not fatal. This is an optimisation, and the per-lab rebuild below is
+        # what decides whether a lab synced: a configuration that cannot build
+        # should be reported against its own name, next to the labs that worked.
+        nix build --no-link "${attrs[@]}" || true
     fi
 
     failed=()

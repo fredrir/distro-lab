@@ -51,10 +51,25 @@
     extraConfig = "makestep 1.0 -1";
   };
 
+  # Sized against the balloon target, not against what the kernel counts at
+  # boot. A lab boots seeing `memory_mib` and the balloon only takes pages away
+  # afterwards, so a percentage of MemTotal is a percentage of memory the lab
+  # does not get to keep: dlab-nixos is 24 GiB on paper and 4 GiB in practice,
+  # and measured an 11.1 GiB zram device inside a 3.5 GiB guest. A compressed
+  # swap three times the size of the RAM backing it does not soften pressure,
+  # it thrashes. memoryMax is the smaller of the two by definition, so the
+  # percentage stays as the shape of the intent and this is what settles it.
   zramSwap = {
     enable = true;
     memoryPercent = 50;
+    memoryMax = spec.current_memory_mib * 1024 * 1024 / 2;
   };
+
+  # zram is RAM: reclaiming a page costs a compress, not a seek. 60 is the
+  # number for a swap file on a disk, and it holds anonymous pages back until
+  # the page cache has already been evicted. With zram as the only swap the
+  # kernel should reach for it first, which is what 150 says.
+  boot.kernel.sysctl."vm.swappiness" = 150;
 
   users.groups.fredrir.gid = 1000;
 
