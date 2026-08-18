@@ -181,6 +181,11 @@ new-lab name kind="project" distro="nixos" source_type="nix":
 
     octet=$(jq '[.[].net.host] | (max // 9) + 1' {{ registry }})
     tmp=$(mktemp)
+
+    # A sandbox boots 4 vCPUs and a project lab 12. Unlike the balloon, vCPUs
+    # are not reserved and cost nothing while idle — cpu_shares is what settles
+    # contention — so a lab that compiles has no reason to start on a quarter of
+    # the machine and wait for someone to remember `just grow`.
     jq --arg l "$lab" --arg k "{{ kind }}" --arg d "{{ distro }}" \
        --arg s "{{ source_type }}" --argjson o "$octet" '
         .[$l] = ({
@@ -192,6 +197,7 @@ new-lab name kind="project" distro="nixos" source_type="nix":
             disk_size_bytes: 68719476736,
             idle: {minutes: 60, action: "managedsave"}
         } + (if $k == "project" then {
+            vcpu_current: 12,
             work_disk_bytes: 53687091200,
             secrets: ["deploy-key"],
             agent: {skillsets: [], skills: []}
