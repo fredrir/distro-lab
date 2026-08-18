@@ -101,6 +101,27 @@ variable "labs" {
     error_message = "Labs with gpu_pci must be sized statically; VFIO pins the whole guest footprint and QEMU inhibits the balloon."
   }
 
+  # A save costs the ceiling, not the balloon. Guest RAM is memfd with shared
+  # access — every lab carries a virtiofs share and that is the backing it
+  # forces — and a read fault on a shared shmem mapping allocates. So when
+  # managedsave walks the RAM block to write it out, it materialises the whole
+  # of memory_mib on the host however little the guest is actually holding.
+  #
+  # Measured: dlab-nsql at 24576 with 1.2 GiB resident spent 29s climbing to
+  # 17.4 GiB of shmem before the OOM killer took QEMU, which leaves the lab
+  # hard-stopped with no save file — a power cut dressed as a suspend, and a
+  # cold boot on the next connection. The same lab at 8192 saved in 2.9s and
+  # restored in 1.9s.
+  #
+  # 12288 is what this host can materialise for one lab while another is awake:
+  # 30 GiB, less the 4 GiB the lifecycle scripts reserve, less a second lab's
+  # resident set. Raise it only alongside host memory, and never above what
+  # `just doctor` reports as available.
+  validation {
+    condition     = alltrue([for k, v in var.labs : v.idle.action != "managedsave" || v.memory_mib <= 12288])
+    error_message = "Labs using idle.action managedsave must keep memory_mib at or below 12288; a save materialises the ceiling and a larger one OOM-kills the domain it is saving."
+  }
+
   validation {
     condition     = alltrue([for k, v in var.labs : v.repo == null || v.work_disk_bytes > 0])
     error_message = "Labs with a repo need work_disk_bytes for the checkout to survive a rebuild."

@@ -767,6 +767,39 @@ doctor:
     avail=$(( $(awk '/^MemAvailable:/ {print $2}' /proc/meminfo) / 1024 ))
     printf '  note  %s MiB committed by awake labs, %s MiB available\n' "$committed" "$avail"
 
+    # A save costs the ceiling rather than the balloon: virtiofs forces
+    # memfd-shared guest RAM, and a read fault on shared shmem allocates, so
+    # managedsave materialises all of memory_mib however little the guest holds.
+    # A ceiling the host cannot hold does not fail the save cleanly — it takes
+    # the OOM killer to QEMU mid-write and leaves the lab hard-stopped with no
+    # saved image, which is a power cut the idle timer performs on a schedule.
+    # The registry caps this statically; what only the host can say is whether
+    # the cap still fits behind whatever is awake right now.
+    # Only awake labs are worth asking about: the stopper saves what is running,
+    # and a lab already holding rss of its ceiling needs the host to find the
+    # remainder, not the whole of it. A stopped lab's ceiling is the registry's
+    # problem, and the module refuses it there.
+    saveable=1
+    checked=0
+    for lab in $(virsh -c "$TF_VAR_libvirt_uri" list --name); do
+        [[ "$lab" == dlab-* ]] || continue
+        [[ "$(spec "$lab" '.[$l].idle.action // "managedsave"')" == managedsave ]] || continue
+        checked=$(( checked + 1 ))
+        ceiling=$(spec "$lab" '.[$l].memory_mib // 8192')
+        held=$(( $(virsh -c "$TF_VAR_libvirt_uri" dommemstat "$lab" 2>/dev/null | awk '/^rss/{print $2}') / 1024 ))
+        need=$(( ceiling - held ))
+        (( need < 0 )) && need=0
+        if (( need <= avail - 4096 )); then
+            ok "$lab is saveable: needs ${need} MiB more of its ${ceiling} MiB ceiling, $(( avail - 4096 )) MiB spendable"
+        else
+            bad "$lab cannot be saved: managedsave must materialise ${need} MiB more of its ${ceiling} MiB ceiling and only $(( avail - 4096 )) MiB is spendable; it would be OOM-killed mid-save. stop another lab, or lower its memory_mib"
+            saveable=0
+        fi
+    done
+    if (( checked == 0 )); then
+        ok "no awake lab idle-stops with managedsave"
+    fi
+
     exit $fail
 
 # Variables that would be handed to OpenTofu
