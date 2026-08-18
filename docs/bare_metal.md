@@ -40,28 +40,30 @@ sudo lvs \
 Example:
 
 ```bash
+sudo mkdir -p /storage/dlab-mounts/roots/nixos
 sudo mount \
   /dev/vg_distro_lab/nixos-root \
-  /storage/distro-lab/roots/nixos
+  /storage/dlab-mounts/roots/nixos
 ```
 
 Unmount:
 
 ```bash
-sudo umount /storage/distro-lab/roots/nixos
+sudo umount /storage/dlab-mounts/roots/nixos
 ```
 
 ### Mount LABEFI
 
 ```bash
+sudo mkdir -p /storage/dlab-mounts/EFI
 sudo mount \
   /dev/disk/by-label/LABEFI \
-  /storage/distro-lab/EFI
+  /storage/dlab-mounts/EFI
 ```
 
 Unmount:
 
 ```bash
-sudo umount /storage/distro-lab/EFI
+sudo umount /storage/dlab-mounts/EFI
 ```
 

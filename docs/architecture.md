@@ -47,10 +47,11 @@ FAT32
 LABEL=LABEFI
 ```
 
-It can be mounted from Arch at:
+It can be mounted from Arch at a directory made for the purpose. The lab no longer
+reserves one, so create it when you need it:
 
 ```text
-/storage/distro-lab/EFI
+/storage/dlab-mounts/EFI
 ```
 
 ARCHEFI on the NVMe remains separate.
@@ -97,25 +98,17 @@ LABEL=storage
 mountpoint=/storage
 ```
 
-It contains both general storage and distro-lab persistent data.
+It holds general storage. The artifact tree used to live here as `/storage/distro-lab/`;
+it now sits on the NVMe inside the checkout, and nothing under `/storage` is required for
+a lab to start. What remains are mountpoints for the bare-metal work below, made on demand
+rather than kept:
 
 ```text
 /storage/
-├── distro-lab/
 ├── Documents/
 ├── SteamLibrary/
+├── dlab-mounts/   # bare-metal roots and LABEFI, created when mounting
 └── ...
-```
-
-Within the lab:
-
-```text
-/storage/distro-lab/
-├── images/
-├── ISOs/
-├── EFI/
-├── roots/
-└── storage/
 ```
 
 ### Disposable vs persistent
@@ -129,21 +122,25 @@ Bare-metal roots are disposable:
 Persistent distro-specific data lives outside the thin pool:
 
 ```text
-/storage/distro-lab/storage/nixos/
+/home/fredrir/projects/distro-lab/storage/nixos/
 ```
 
 Deleting `nixos-root` therefore does not delete the persistent NixOS data.
 
 ## Repository
 
-The checkout and the artifacts it manages are two separate trees. `TF_VAR_storage_path`
-in `.env` names the artifact tree, and everything that writes an image or a state share
-resolves it from there, so the checkout itself can sit anywhere — on a fast disk, for
-instance, while the artifacts stay on the big one:
+`TF_VAR_storage_path` in `.env` names the artifact tree, and everything that writes an
+image or a state share resolves it from there. It points into the checkout, so code and
+artifacts sit on one filesystem:
 
 ```text
-TF_VAR_storage_path="/storage/distro-lab"
+TF_VAR_storage_path="/home/fredrir/projects/distro-lab"
 ```
+
+The indirection is still worth keeping even though the two trees now coincide: it is what
+let the artifacts move off the spinning disk without reinstalling anything. A path that
+appears in a domain's XML, in the pool, and inside every overlay's qcow2 header is not one
+you want to have hardcoded.
 
 `src/` in the checkout contains configuration and infrastructure code:
 
@@ -155,14 +152,13 @@ src/
 └── vg_distro_lab-before-nixos.conf
 ```
 
-Runtime and large binary data live in the artifact tree, never in the checkout:
+Runtime and large binary data live in the artifact tree, which is gitignored rather than
+tracked:
 
 ```text
-/storage/distro-lab/images/
-/storage/distro-lab/ISOs/
-/storage/distro-lab/roots/
-/storage/distro-lab/storage/
-/storage/distro-lab/EFI/
+images/
+ISOs/
+storage/
 ```
 
 OpenTofu state is per-checkout, in `src/labs/<lab>/tofu/`, so exactly one checkout may
@@ -230,7 +226,7 @@ These describe deployed infrastructure and should be treated as state rather tha
 Long-lived distro data belongs under:
 
 ```text
-/storage/distro-lab/storage/<distro>/
+/home/fredrir/projects/distro-lab/storage/<distro>/
 ```
 
 This is intentionally independent of disposable VM or bare-metal root filesystems.

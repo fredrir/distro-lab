@@ -11,19 +11,15 @@ The checkout, which can live anywhere:
 ```text
 distro-lab/
 ├── flake.nix   # NixOS labs, built from the registry
-└── src/        # tracked configuration and infrastructure
-```
-
-The artifact tree it drives, named by `TF_VAR_storage_path` in `.env`:
-
-```text
-/storage/distro-lab/
+├── src/        # tracked configuration and infrastructure
 ├── images/     # VM disk images
 ├── ISOs/       # installation media
-├── roots/      # mountpoints for bare-metal roots
-├── EFI/        # LABEFI mountpoint
 └── storage/    # persistent per-lab data
 ```
+
+The last three are the artifact tree, named by `TF_VAR_storage_path` in `.env` and
+gitignored rather than tracked. It lives inside the checkout, so code and artifacts sit
+on one filesystem.
 
 ## Documentation
 - [`docs/architecture.md`](./docs/architecture.md) — host, disks, LVM, storage and state.
